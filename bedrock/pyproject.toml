@@ -7,7 +7,7 @@ dependencies = [
     "litellm[proxy]>=1.83.0",
     "aws-bedrock-token-generator>=1.0.0",
     "datasets>=2.20.0",
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.0",
 ]
 
 [tool.uv]
