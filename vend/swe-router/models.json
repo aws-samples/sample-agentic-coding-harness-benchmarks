@@ -13,7 +13,7 @@
       "reasoning_effort": "high",
       "repo_grounded": true
     },
-    "repository": "https://github.com/aarora79/agentic-coding-harness-benchmarks"
+    "repository": "https://github.com/aws-samples/sample-agentic-coding-harness-benchmarks"
   },
   "measurement_basis": {
     "what_the_score_is": "Mean 0-100 score over the dataset's tasks. Each task is judged on six artifacts: a GitHub issue spec, a low-level design, an expert review, a testing plan, a patch, and an implementation summary.",
