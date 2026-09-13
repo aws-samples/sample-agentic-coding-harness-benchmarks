@@ -1,0 +1,61 @@
+# Models this organisation permits, and that its coding agents can reach.
+#
+# One model per line. Blank lines and anything after a # are ignored, so
+# annotate freely. Names are matched through model-aliases.json, so any
+# spelling your assistant uses will work: claude-sonnet-5,
+# us.anthropic.claude-sonnet-5 and Claude Sonnet 5 all resolve to the same
+# model.
+#
+# This list is a hard constraint. A model missing from it is never
+# recommended, whatever it scores. Delete this file and every model is
+# permitted.
+#
+# It is also the whole candidate set. The skill takes every entry here as a
+# model the developer can actually select, and does not go looking at the
+# agent's model picker or provider config to second-guess that -- a model
+# served through a proxy or driven by a second agent is invisible to such a
+# check, and dropping it would silently cost the developer the cheaper
+# option. So whoever maintains this file owns both halves of the promise:
+#
+#   list a model  ->  a developer can select it from the agent they run
+#   cannot reach it  ->  it does not belong on the list
+#
+# Get that wrong in the generous direction and the skill recommends a model
+# nobody can switch to. Get it wrong the other way -- leaving out something
+# people do have -- and it silently recommends a pricier model instead.
+#
+# ---------------------------------------------------------------------------
+# What ships here, and why you should change it
+# ---------------------------------------------------------------------------
+# These six are the models on the measured cost/quality frontier: nothing
+# else scores at least as well for at most the cost, across the whole
+# 21-task benchmark. That is a defensible starting point and a poor
+# finished one, for two reasons.
+#
+# Five of the six are self-hosted, and the shipped file cannot know whether
+# you serve them. If you do not, delete those four lines -- left in, they
+# will be recommended, and a developer on a hosted API will be told to
+# switch to a model they cannot select. With only claude-opus-5 left they
+# would be sent there for everything, including a docs page, so add the
+# hosted models they do have.
+#
+# Frontier membership also comes from whole-dataset means, which is not the
+# ranking that decides a task. claude-sonnet-5 is missing because
+# qwen3.8-27b beats it on average -- 78.48 to 76.97, at a third of the
+# cost. On high-complexity work that reverses: sonnet scores 73.68 having
+# finished all five hard tasks, qwen3.8-27b scores 71.45 having failed one.
+#
+# So add the models your developers can actually reach. Uncomment these two
+# if they are on a hosted API:
+#
+#   claude-sonnet-5     # 76.97, $4.67/task. Beats qwen3.8-27b on hard work.
+#   claude-haiku-4-5    # 56.18, $0.76/task. Cheapest hosted option.
+
+claude-opus-5           # 82.83, $11.95/task, Bedrock. Highest scoring measured.
+glm-5.3                 # 80.11, $7.04/task, self-hosted. Within 2.7 of the top.
+kimi-k3                 # 79.17, $4.33/task, self-hosted. New frontier point.
+qwen3.8-27b             # 78.48, $1.47/task, self-hosted. Best value here, but
+                        # drops to 71.45 on high-complexity work and did not
+                        # finish one of the five hard tasks.
+gemma-4-31b             # 59.74, $0.87/task, self-hosted.
+qwen3.6-35b             # 59.24, $0.26/task, self-hosted. Cheapest measured.
