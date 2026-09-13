@@ -22,7 +22,7 @@ cd self-hosted/vllm/scripts
 MODEL=Qwen/Qwen3-32B SERVED_NAME=qwen3-32b TOOL_PARSER=hermes ./vllm-serve.sh
 ```
 
-Fully spelled out (recommended for a reproducible benchmark run):
+Wrapper with every model-specific parameter spelled out:
 
 ```bash
 MODEL="Qwen/Qwen3-32B" \
@@ -33,6 +33,30 @@ MAX_MODEL_LEN=32768 \
 GPU_MEM_UTIL=0.90 \
 TOOL_PARSER="hermes" \
   ./vllm-serve.sh
+```
+
+Exact vLLM command, including the same log destination as the wrapper:
+
+```bash
+cd self-hosted/vllm
+mkdir -p logs
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export CUDA_HOME=/opt/pytorch/cuda
+export HF_HOME=/opt/dlami/nvme/hf-cache
+export HF_HUB_CACHE="$HF_HOME/hub"
+export VLLM_NO_USAGE_STATS=1
+export DO_NOT_TRACK=1
+
+~/vllm-env/bin/vllm serve Qwen/Qwen3-32B \
+  --tensor-parallel-size 4 \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --served-model-name qwen3-32b \
+  --max-model-len 32768 \
+  --gpu-memory-utilization 0.90 \
+  --enable-auto-tool-choice --tool-call-parser hermes \
+  --enable-prefix-caching \
+  2>&1 | tee logs/vllm-serve.log
 ```
 
 ## Dense vs. the MoE default — read this first
@@ -49,10 +73,25 @@ Every one of the 32.8B parameters activates on every token. That is roughly **10
   - **≤32768 — no `ROPE_SCALING`.** Just serve at native; raise/lower `MAX_MODEL_LEN` within the native window freely.
   - **Up to 128K — enable YaRN.** Past the 32K native window you must add rope scaling:
     ```bash
-    MODEL=Qwen/Qwen3-32B SERVED_NAME=qwen3-32b TOOL_PARSER=hermes \
-      MAX_MODEL_LEN=131072 ROPE_SCALING=4 ./vllm-serve.sh
+    cd self-hosted/vllm
+    mkdir -p logs
+    export VLLM_USE_FLASHINFER_SAMPLER=0
+    export CUDA_HOME=/opt/pytorch/cuda
+    export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+
+    ~/vllm-env/bin/vllm serve Qwen/Qwen3-32B \
+      --tensor-parallel-size 4 \
+      --host 127.0.0.1 \
+      --port 8000 \
+      --served-model-name qwen3-32b \
+      --max-model-len 131072 \
+      --gpu-memory-utilization 0.90 \
+      --enable-auto-tool-choice --tool-call-parser hermes \
+      --enable-prefix-caching \
+      --hf-overrides '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}}' \
+      2>&1 | tee logs/vllm-serve.log
     ```
-    `ROPE_SCALING=4` = 4 × the 32768 native window (use `2` for 64K). **Tradeoffs:** 4× the window ≈ ¼ the concurrency (KV cache scales linearly with context), and YaRN is static so it can degrade short-prompt quality — leave it off unless you truly need >32K. 131072 is the card's validated ceiling; do not push past it. See [Long context past 32K](../README.md#long-context-and-rope_scaling-yarn).
+    YaRN factor `4` extends the 32768 native window to 131072 (use `2` for 64K). On vLLM `0.25.1`, configure it through `--hf-overrides`; the old `--rope-scaling` flag is no longer accepted. **Tradeoffs:** 4× the window ≈ ¼ the concurrency (KV cache scales linearly with context), and YaRN is static so it can degrade short-prompt quality — leave it off unless you truly need >32K. 131072 is the card's validated ceiling; do not push past it. See [Long context past 32K](../README.md#long-context-and-rope_scaling-yarn).
 
 ## Naming note
 

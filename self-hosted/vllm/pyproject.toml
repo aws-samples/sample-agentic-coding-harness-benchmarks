@@ -11,6 +11,12 @@ dependencies = [
     "httpx>=0.27.0",
     # Token accounting when comparing against API pricing
     "tiktoken>=0.7.0",
+    # Parse vLLM's Prometheus /metrics snapshots into benchmark CSV rows
+    "prometheus-client>=0.20.0",
+    # Persist continuous vLLM metric samples for SQL analytics
+    "duckdb>=1.3.0",
+    # DuckDB TIMESTAMPTZ conversion support
+    "pytz>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +27,7 @@ dev = [
 [dependency-groups]
 dev = [
     "ruff>=0.4.0",
+    "mypy>=1.10.0",
 ]
 
 # These clients talk to the vLLM server over HTTP; they do NOT import vllm and

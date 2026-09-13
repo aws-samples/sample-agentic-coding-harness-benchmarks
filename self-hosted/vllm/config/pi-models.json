@@ -1,0 +1,25 @@
+{
+  "_comment": "Reference pi custom-provider config for a local vLLM server. Copy to ~/.pi/agent/models.json, or let scripts/run-pi.sh generate and keep it in sync with the served model. pi accepts any --model id under a declared provider, so the single model entry below is an anchor; run-pi.sh rewrites its id to match whatever /v1/models reports.",
+  "providers": {
+    "vllm": {
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "qwen3-coder-30b",
+          "name": "vLLM: qwen3-coder-30b",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 200000,
+          "maxTokens": 20000,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}

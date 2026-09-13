@@ -7,8 +7,8 @@ set -euo pipefail
 #
 # vLLM shards the model across all GPUs with tensor parallelism
 # (--tensor-parallel-size), so a 30B–80B model that will not fit on one L40S
-# (46 GB) serves comfortably across four. Unlike Ollama's pipeline split,
-# tensor parallelism keeps every GPU busy on every token and sustains high
+# (46 GB) serves comfortably across four. Tensor parallelism keeps every GPU
+# busy on every token and sustains high
 # throughput under concurrent load — the regime the cost model in the strategy
 # doc depends on.
 #
@@ -24,13 +24,19 @@ set -euo pipefail
 #   SERVED_NAME        name clients pass as --model   (default: qwen3-coder-30b)
 #   TP                 tensor-parallel size / #GPUs   (default: 4)
 #   PORT               OpenAI-compatible API port     (default: 8000)
+#                      Server state is scoped to PORT, so several models can be
+#                      served side by side on one host (one per GPU, each with its
+#                      own CUDA_VISIBLE_DEVICES). Port 8000 keeps the historical
+#                      paths /tmp/vllm-serve.pid and logs/vllm-serve.log; any other
+#                      port gets the -$PORT suffix. `--stop` then stops only that
+#                      port's instance; use `--stop-all` to stop every instance.
 #   MAX_MODEL_LEN      context window to serve        (default: 32768)
 #   ROPE_SCALING       extend context past the model's native window with YaRN.
 #                      Two forms:
 #                        - a bare number  → YaRN factor, e.g. ROPE_SCALING=4
 #                          (serves 4x the native 32768 = 131072 tokens / 128K)
-#                        - a full JSON object passed through to --rope-scaling
-#                          verbatim, e.g. '{"rope_type":"yarn","factor":4.0,...}'
+#                        - a full JSON object nested under `rope_scaling` in
+#                          --hf-overrides, e.g. '{"rope_type":"yarn","factor":4.0,...}'
 #                      Leave unset (default) to serve at the native window. Set
 #                      MAX_MODEL_LEN to the extended length alongside it.
 #                      (default: unset — no rope scaling)
@@ -69,7 +75,7 @@ set -euo pipefail
 # server. Run `vllm serve --help` for the full parser list.
 #
 # The server binds to 127.0.0.1 only. Reach it from your laptop with an SSH
-# tunnel (see tunnel.sh), exactly like the Ollama path — no public ingress.
+# tunnel (see tunnel.sh) — no public ingress.
 # ---------------------------------------------------------------------------
 
 MODEL="${MODEL:-Qwen/Qwen3-Coder-30B-A3B-Instruct}"
@@ -105,6 +111,15 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${LOG_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)/logs}"
 
+# On an 8xH200 (p5en) DLAMI, FP8 models cannot JIT their kernels without CUDA
+# path fixes, and torch.compile/Triton default their caches to the 29 GB root
+# disk, which a multi-model run fills. Applied here so serving works the same
+# whether this script is launched directly (the throughput sweep) or through
+# run-multi-model-benchmark.sh (the quality path) -- previously only the latter
+# exported them. No-op on any other node; explicit caller values always win.
+# shellcheck source=./p5en-cuda-env.sh
+. "$SCRIPT_DIR/p5en-cuda-env.sh"
+
 FOREGROUND=0
 [[ "${1:-}" == "--foreground" || "${1:-}" == "-f" ]] && FOREGROUND=1
 
@@ -117,34 +132,95 @@ fail()   { echo -e "${RED}[fail]${RESET}  $1"; exit 1; }
 # --help: print the header comment block (env vars + options) and exit.
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   sed -n '5,65p' "$0" | sed 's/^# \{0,1\}//; s/^#$//'
-  echo "Options: --foreground|-f  (run in foreground)   --stop  (stop + free GPUs)"
+  echo "Options: --foreground|-f  (run in foreground)   --stop  (stop this PORT + free its GPUs)   --stop-all  (stop every vLLM instance)"
   exit 0
 fi
 
-# --stop: kill the background server (launcher + tee + vLLM workers) and free GPUs.
-if [[ "${1:-}" == "--stop" ]]; then
+# PORT is now used to BUILD FILE PATHS (the pid file and the log name) and those
+# paths are interpolated into the `bash -c` string that launches the server, so it
+# has to be validated before either use. Unvalidated, PORT=../../etc/x would place
+# the log and pid file outside their directories, and a PORT containing a quote
+# would break out of the launch string. It is only ever a TCP port, so require
+# exactly that.
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+  fail "PORT must be an integer in 1..65535, got: '$PORT'"
+fi
+
+# Server state is scoped to PORT so several instances can run side by side on one
+# host -- one per GPU (or GPU pair), each serving a different model, which is how a
+# parallel throughput sweep gets six arms done in two passes instead of six. Port
+# 8000 deliberately keeps the historical unsuffixed paths, so every existing doc,
+# `tail -f logs/vllm-serve.log` habit and bare `--stop` behaves exactly as before.
+if [[ "$PORT" == "8000" ]]; then
+  PID_FILE="/tmp/vllm-serve.pid"
+  LOG_NAME="vllm-serve.log"
+else
+  PID_FILE="/tmp/vllm-serve-$PORT.pid"
+  LOG_NAME="vllm-serve-$PORT.log"
+fi
+
+# --stop: kill this PORT's server (launcher + tee + vLLM workers) and free its GPUs.
+# --stop-all: kill EVERY vLLM instance on the host, by name (the old blunt behaviour).
+if [[ "${1:-}" == "--stop" || "${1:-}" == "--stop-all" ]]; then
   STOPPED=0
-  if [[ -f /tmp/vllm-serve.pid ]]; then
-    PID=$(cat /tmp/vllm-serve.pid)
-    kill "$PID" 2>/dev/null && STOPPED=1 || true
-    rm -f /tmp/vllm-serve.pid
+  # The engine and TP workers are children of the launcher, but they RENAME
+  # themselves to "VLLM::Worker_TP<N>" / "VLLM::EngineCore", so `pkill -f "vllm
+  # serve"` misses them and they keep the GPUs pinned. Renaming does not change
+  # the process GROUP, though, so signalling the launcher's group reaches all of
+  # them -- and, unlike a name match, reaches ONLY this instance's workers.
+  if [[ -f "$PID_FILE" ]]; then
+    PID=$(cat "$PID_FILE" 2>/dev/null || true)
+    # /tmp is world-writable, so the pid file is UNTRUSTED input, and this block
+    # now signals a whole process GROUP rather than a single pid -- so without
+    # these checks `--stop` would be a primitive for SIGKILLing an arbitrary
+    # process group, with whoever created /tmp/vllm-serve-*.pid choosing the
+    # target. Require a plain pid, and require that pid to actually be one of our
+    # vLLM launchers before signalling its group. (The kill itself still runs as
+    # this user, so this bounds a local nuisance, not a privilege escalation.)
+    if [[ ! "$PID" =~ ^[1-9][0-9]*$ ]]; then
+      warn "Ignoring $PID_FILE: contents are not a pid."
+      PID=""
+    elif ! ps -p "$PID" -o args= 2>/dev/null | grep -q vllm; then
+      warn "Ignoring $PID_FILE: pid $PID is not a vLLM process."
+      PID=""
+    fi
+    if [[ -n "$PID" ]]; then
+      # `|| true`: under `set -e -o pipefail` a dead pid makes `ps` fail, and an
+      # assignment from a failing pipeline would abort the script before it could
+      # fall back to the name-based rescue below.
+      PGID=$(ps -o pgid= -p "$PID" 2>/dev/null | tr -d ' ' || true)
+      if [[ -n "$PGID" ]]; then
+        kill -TERM -- "-$PGID" 2>/dev/null && STOPPED=1 || true
+      else
+        kill "$PID" 2>/dev/null && STOPPED=1 || true
+      fi
+    fi
+    rm -f "$PID_FILE" 2>/dev/null || true
   fi
-  # The actual vLLM engine + TP workers are children; kill them by name too so
-  # no orphaned process keeps the GPUs pinned. NOTE: the tensor-parallel workers
-  # rename their process to "VLLM::Worker_TP<N>" (and the engine core to
-  # "VLLM::EngineCore"), so `pkill -f "vllm serve"` alone MISSES them and they keep
-  # the GPUs allocated. Match all three patterns.
-  for pat in "vllm serve" "VLLM::Worker" "VLLM::EngineCore"; do
-    pkill -f "$pat" 2>/dev/null && STOPPED=1 || true
-  done
+  # Fall back to the blunt name-based sweep when asked for explicitly, or when
+  # there is no pid file to work from AND no other instance is running that it
+  # could collaterally kill. That keeps the old "free the GPUs no matter what"
+  # rescue for the single-server case without endangering sibling arms.
+  # `|| true` for the same pipefail reason: `ls` fails when no pid file matches.
+  OTHER_PIDS=$(ls /tmp/vllm-serve-*.pid /tmp/vllm-serve.pid 2>/dev/null | wc -l || true)
+  if [[ "${1:-}" == "--stop-all" || ( "$STOPPED" -eq 0 && "$OTHER_PIDS" -eq 0 ) ]]; then
+    for pat in "vllm serve" "VLLM::Worker" "VLLM::EngineCore"; do
+      pkill -f "$pat" 2>/dev/null && STOPPED=1 || true
+    done
+  fi
   # Give them a moment to release VRAM, then escalate to SIGKILL for any straggler
   # (CUDA teardown occasionally wedges a worker in an uninterruptible state).
   if [[ "$STOPPED" -eq 1 ]]; then
     sleep 3
-    for pat in "vllm serve" "VLLM::Worker" "VLLM::EngineCore"; do
-      pkill -9 -f "$pat" 2>/dev/null || true
-    done
-    ok "Stopped vLLM server. GPUs free once the workers exit (check: nvidia-smi)."
+    if [[ -n "${PGID:-}" ]]; then
+      kill -KILL -- "-$PGID" 2>/dev/null || true
+    elif [[ "${1:-}" == "--stop-all" || "$OTHER_PIDS" -eq 0 ]]; then
+      # Only escalate by name when there is no sibling instance to hit.
+      for pat in "vllm serve" "VLLM::Worker" "VLLM::EngineCore"; do
+        pkill -9 -f "$pat" 2>/dev/null || true
+      done
+    fi
+    ok "Stopped vLLM server on port $PORT. GPUs free once the workers exit (check: nvidia-smi)."
   else
     warn "No running vLLM server found."
   fi
@@ -153,6 +229,40 @@ fi
 
 VLLM_BIN="$VLLM_ENV/bin/vllm"
 [[ -x "$VLLM_BIN" ]] || fail "vLLM not found at $VLLM_BIN. Run ./vllm-install.sh first (or set VLLM_ENV)."
+
+# Fail fast on a bad tool-call parser name BEFORE the (multi-GB, multi-minute)
+# model download and engine load. vLLM only validates --tool-call-parser after
+# it starts loading, so a typo or a filename/registry mismatch (e.g. the Gemma4
+# parser file is gemma4_engine_tool_parser.py but the REGISTERED name is
+# "gemma4") otherwise wastes a full download. Query the installed vLLM's actual
+# registered names and check the requested one against them.
+if [[ -n "$TOOL_PARSER" && "$TOOL_PARSER" != "none" ]]; then
+  VALID_PARSERS="$("$VLLM_ENV/bin/python" - <<'PY' 2>/dev/null
+# Mirror vLLM's own check in validate_api_server_args: the registry is lazily
+# populated, so list_registered() is what actually triggers registration and
+# returns the real names (plain .keys() reads empty before that).
+names = []
+try:
+    from vllm.tool_parsers.abstract_tool_parser import ToolParserManager
+    names = list(ToolParserManager.list_registered())
+except Exception:
+    try:  # older vLLM layout
+        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+        names = list(ToolParserManager.list_registered())
+    except Exception:
+        names = []
+print(" ".join(sorted(names)))
+PY
+)"
+  if [[ -n "$VALID_PARSERS" && " $VALID_PARSERS " != *" $TOOL_PARSER "* ]]; then
+    fail "invalid TOOL_PARSER '$TOOL_PARSER' for the installed vLLM.
+       Valid parsers: $VALID_PARSERS
+       (Note: the registered name can differ from the parser's source filename --
+       e.g. use 'gemma4', not 'gemma4_engine'. Set TOOL_PARSER=none for a plain
+       completion server.)"
+  fi
+  [[ -z "$VALID_PARSERS" ]] && info "Could not enumerate tool parsers to pre-validate '$TOOL_PARSER'; vLLM will validate at load time."
+fi
 
 # Sanity: enough GPUs for the requested tensor-parallel size?
 GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l | xargs)
@@ -246,9 +356,9 @@ ARGS=(
 )
 
 # Extend the context past the model's native window with YaRN rope scaling.
-# Qwen3 models ship configured for a 32K native window; reaching 128K requires
-# --rope-scaling, and vLLM will REJECT --max-model-len beyond native without it.
-# ROPE_SCALING accepts either a bare YaRN factor (e.g. 4) or a full JSON object.
+# vLLM 0.25 removed the old --rope-scaling CLI flag, so patch the Hugging Face
+# model config through --hf-overrides instead. ROPE_SCALING accepts either a
+# bare YaRN factor (e.g. 4) or a full JSON object.
 if [[ -n "$ROPE_SCALING" ]]; then
   if [[ "$ROPE_SCALING" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     # Bare number → YaRN factor. Derive the native window from MAX_MODEL_LEN / factor
@@ -261,7 +371,8 @@ if [[ -n "$ROPE_SCALING" ]]; then
     ROPE_JSON="$ROPE_SCALING"
     info "Rope scaling: $ROPE_JSON"
   fi
-  ARGS+=( --rope-scaling "$ROPE_JSON" )
+  export VLLM_ALLOW_LONG_MAX_MODEL_LEN="${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}"
+  ARGS+=( --hf-overrides "{\"rope_scaling\":$ROPE_JSON}" )
 fi
 
 # Cap the number of concurrent sequences. Mostly you leave this unset (vLLM defaults
@@ -297,7 +408,7 @@ if [[ -n "$EXTRA_ARGS" ]]; then
 fi
 
 mkdir -p "$LOG_DIR"
-LOG="$LOG_DIR/vllm-serve.log"
+LOG="$LOG_DIR/$LOG_NAME"
 
 if [[ "$FOREGROUND" -eq 1 ]]; then
   info "Starting vLLM in the foreground (Ctrl-C to stop). First run downloads weights."
@@ -312,10 +423,22 @@ info "(logs/ is gitignored — the log is never committed)"
 info "First run downloads the weights (30B ≈ 61 GB) — allow several minutes."
 # tee inside the background job so the file captures everything; the foreground
 # shell stays free to poll for readiness below.
-nohup bash -c "'$VLLM_BIN' $(printf '%q ' "${ARGS[@]}") 2>&1 | tee '$LOG'" >/dev/null 2>&1 &
-SERVE_PID=$!
-echo "$SERVE_PID" > /tmp/vllm-serve.pid
-info "Launcher PID $SERVE_PID (saved to /tmp/vllm-serve.pid)"
+#
+# setsid puts the launcher in its own session, which is what makes `--stop` able
+# to signal the whole process GROUP. That matters because the TP workers rename
+# themselves and so cannot be matched by name -- but they do inherit the group.
+# Without setsid, a background job in a non-interactive script inherits the
+# SCRIPT's process group, so a group kill would also kill the calling driver.
+# The pid is written from inside the child, whose $$ is the new session leader
+# (and therefore the group id), rather than from $! out here, which is the same
+# pid only when setsid happens not to fork.
+# `|| true`: in a sticky /tmp this unlink fails if the file belongs to another
+# user, and `set -e` would otherwise abort the launch instead of falling back.
+rm -f "$PID_FILE" 2>/dev/null || true
+nohup setsid bash -c "echo \$\$ > '$PID_FILE'; '$VLLM_BIN' $(printf '%q ' "${ARGS[@]}") 2>&1 | tee '$LOG'" >/dev/null 2>&1 &
+for _ in $(seq 1 50); do [[ -s "$PID_FILE" ]] && break; sleep 0.1; done
+SERVE_PID="$(cat "$PID_FILE" 2>/dev/null || echo $!)"
+info "Launcher PID $SERVE_PID (saved to $PID_FILE)"
 info "Tail the log live with:  tail -f $LOG"
 echo ""
 
@@ -334,7 +457,7 @@ for i in $(seq 1 360); do
     echo "Next steps:"
     echo "  1. Verify inference:   ./vllm-verify.sh"
     echo "  2. Tunnel from laptop: LOCAL_MODEL_PORT=$PORT G6E_IP=<ip> ./tunnel.sh start"
-    echo "  3. Stop the server:    ./vllm-serve.sh --stop   (or: kill \$(cat /tmp/vllm-serve.pid))"
+    echo "  3. Stop the server:    PORT=$PORT ./vllm-serve.sh --stop   (or: kill \$(cat $PID_FILE))"
     exit 0
   fi
   sleep 5
