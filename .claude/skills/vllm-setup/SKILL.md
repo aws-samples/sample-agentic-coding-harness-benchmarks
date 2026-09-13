@@ -15,6 +15,8 @@ Use this skill to bring up a vLLM inference server for an open-weight coding mod
 
 All the underlying logic lives in [`self-hosted/vllm/scripts/`](../../../self-hosted/vllm/scripts/): `vllm-install.sh`, `vllm-serve.sh`, `vllm-verify.sh`, `opencode-setup.sh`. This skill orchestrates them, reports each step, confirms inference works, and optionally sets up opencode. The full architecture and the *why* behind every dependency is documented in [`self-hosted/vllm/README.md`](../../../self-hosted/vllm/README.md) — read it if the user asks what is being installed or why a step exists. Every script also takes `--help`.
 
+> **Running on a p5en.48xlarge (8x H200 / NVSwitch)?** The scripts were verified on the reference g6e.12xlarge (4x L40S). An 8-GPU NVSwitch box needs extra one-time fixes the reference node never hits — NVIDIA driver alignment + reboot, putting the venv/weights on the large NVMe (the root disk is tiny), and two CUDA-JIT fixes at serve time (`ninja` on PATH, and unversioned `libcudart.so`/`libcuda.so` for FlashInfer's mnnvl allreduce link step). All of them, with copy-pasteable commands and a symptom→fix table, are in [`p5en-h200-cuda-fixes.md`](p5en-h200-cuda-fixes.md). Read it before Step 3/4 on that hardware; skip it entirely on the 4x L40S reference node.
+
 ## Workflow
 
 1. **Confirm the node** — verify a GPU + capture specs; abort if not on a GPU box
@@ -84,6 +86,7 @@ MODEL="<chosen>" SERVED_NAME="<chosen>" ./vllm-serve.sh
 ```
 
 - Note the reference-node fixes the serve script applies automatically: `VLLM_USE_FLASHINFER_SAMPLER=0` (native sampler — avoids FlashInfer's runtime nvcc requirement against a `/usr/local/cuda` that does not exist on the DLAMI) and a `CUDA_HOME` fallback pointing at `/opt/pytorch/cuda`.
+- **On a p5en.48xlarge (8x H200 / NVSwitch):** the serve script's automatic fixes are not enough — export the PATH and CUDA-link environment from [`p5en-h200-cuda-fixes.md`](p5en-h200-cuda-fixes.md) *before* running `vllm-serve.sh`, or startup fails at KV-cache init (`No such file or directory: 'ninja'`) and again after graph capture (`ld: cannot find -lcudart`). That file has the exact exports and a symptom→fix table.
 - The script tees the full server log to `self-hosted/vllm/logs/vllm-serve.log` (gitignored) and polls until ready. First serve of a model downloads the weights (~57 GB for 30B) — this can take several minutes. Reassure the user; tail the log if they want to watch: `tail -f self-hosted/vllm/logs/vllm-serve.log`.
 - If the process exits early, read the tail of that log for the root cause.
 
@@ -151,7 +154,7 @@ Summarize:
 - opencode status (installed?, provider wired, verified)
 - how to monitor: `nvtop`, `~/vllm-env/bin/gpustat -i 1`
 - how to stop: `./vllm-serve.sh --stop`
-- how to reach it from a laptop: SSH tunnel (point at `../ollama/scripts/tunnel.sh` with `LOCAL_MODEL_PORT=8000`)
+- how to reach it from a laptop: SSH tunnel (`scripts/tunnel.sh` with `LOCAL_MODEL_PORT=8000`)
 
 ---
 
