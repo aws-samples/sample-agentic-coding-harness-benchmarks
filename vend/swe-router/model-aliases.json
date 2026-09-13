@@ -1,0 +1,116 @@
+{
+  "schema_version": "1.0",
+  "note": "Maps the model slugs in models.json to the names coding assistants actually show or accept. One slug, many surfaces: a Bedrock inference profile, a vendor API id, a provider-prefixed id, and whatever a dropdown displays. Matching is case-insensitive; compare after lowercasing and stripping spaces, underscores and hyphens. If nothing matches exactly, fall back to substring and then ask the user.",
+  "matching_rules": [
+    "Lowercase both sides, then strip spaces, underscores and hyphens before comparing.",
+    "A trailing bracketed hint such as [1m] is a context-window marker, not part of the id. Strip it.",
+    "A leading region and vendor prefix such as us.anthropic. or eu.meta. is routing, not identity. Strip it.",
+    "A trailing date-and-version stamp such as -20251001-v1:0 identifies a snapshot of the same model. Strip it.",
+    "A provider prefix before a slash, such as anthropic/ or bedrock/, is routing. Strip it.",
+    "Match exactly first. Only if that fails, try substring. Never guess between two candidates -- ask."
+  ],
+  "unmatched_model_policy": "A model the user has that is absent from models.json has NOT been measured. Say so and leave it out of the ranking. Never estimate a score for it.",
+  "aliases": {
+    "claude-opus-5": [
+      "claude-opus-5",
+      "us.anthropic.claude-opus-5",
+      "anthropic/claude-opus-5",
+      "Claude Opus 5",
+      "opus-5",
+      "opus5"
+    ],
+    "claude-opus-4-8": [
+      "claude-opus-4-8",
+      "us.anthropic.claude-opus-4-8",
+      "anthropic/claude-opus-4-8",
+      "Claude Opus 4.8",
+      "opus-4.8",
+      "opus-4-8"
+    ],
+    "claude-opus-4-7": [
+      "claude-opus-4-7",
+      "us.anthropic.claude-opus-4-7",
+      "anthropic/claude-opus-4-7",
+      "Claude Opus 4.7",
+      "opus-4.7",
+      "opus-4-7"
+    ],
+    "claude-opus-4-6-v1": [
+      "claude-opus-4-6",
+      "claude-opus-4-6-v1",
+      "us.anthropic.claude-opus-4-6",
+      "anthropic/claude-opus-4-6",
+      "Claude Opus 4.6",
+      "opus-4.6",
+      "opus-4-6"
+    ],
+    "claude-opus-4-5": [
+      "claude-opus-4-5",
+      "us.anthropic.claude-opus-4-5",
+      "anthropic/claude-opus-4-5",
+      "Claude Opus 4.5",
+      "opus-4.5",
+      "opus-4-5"
+    ],
+    "claude-sonnet-5": [
+      "claude-sonnet-5",
+      "us.anthropic.claude-sonnet-5",
+      "anthropic/claude-sonnet-5",
+      "Claude Sonnet 5",
+      "sonnet-5",
+      "sonnet5"
+    ],
+    "claude-haiku-4-5": [
+      "claude-haiku-4-5",
+      "claude-haiku-4-5-20251001",
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "anthropic/claude-haiku-4-5",
+      "Claude Haiku 4.5",
+      "haiku-4.5",
+      "haiku-4-5"
+    ],
+    "glm-5.3": ["glm-5.3", "zai-org/GLM-5.3", "GLM-5.3", "glm5.3"],
+    "qwen3.8-27b": [
+      "qwen3.8-27b",
+      "Qwen/Qwen3.8-27B",
+      "Qwen/Qwen3.8-27B-FP8",
+      "Qwen3.8-27B",
+      "qwen3.8"
+    ],
+    "qwen3.6-35b": ["qwen3.6-35b", "Qwen/Qwen3.6-35B", "Qwen3.6-35B", "qwen3.6"],
+    "qwen3-coder-30b": [
+      "qwen3-coder-30b",
+      "Qwen/Qwen3-Coder-30B",
+      "Qwen3-Coder-30B",
+      "qwen3coder30b"
+    ],
+    "kimi-k2.7-code": [
+      "kimi-k2.7-code",
+      "moonshotai/Kimi-K2.7-Code",
+      "Kimi K2.7 Code",
+      "kimi-k2.7"
+    ],
+    "kimi-k3": [
+      "kimi-k3",
+      "moonshotai/Kimi-K3",
+      "Kimi K3",
+      "kimik3"
+    ],
+    "deepseek-v3.2": [
+      "deepseek-v3.2",
+      "deepseek-ai/DeepSeek-V3.2",
+      "DeepSeek-V3.2",
+      "deepseek3.2"
+    ],
+    "gemma-4-31b": ["gemma-4-31b", "google/gemma-4-31b", "Gemma 4 31B", "gemma4-31b"],
+    "minimax-m2.5": ["minimax-m2.5", "MiniMaxAI/MiniMax-M2.5", "MiniMax M2.5", "minimax2.5"],
+    "minimax-m3": ["minimax-m3", "MiniMaxAI/MiniMax-M3", "MiniMax M3", "minimaxm3"],
+    "devstral-2-123b": [
+      "devstral-2-123b",
+      "mistralai/Devstral-2-123B",
+      "Devstral 2 123B",
+      "devstral2"
+    ],
+    "minicpm5-2b": ["minicpm5-2b", "openbmb/MiniCPM5-2B", "MiniCPM5-2B", "minicpm5"]
+  }
+}
