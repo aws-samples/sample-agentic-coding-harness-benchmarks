@@ -22,7 +22,7 @@ cd self-hosted/vllm/scripts
 ./vllm-serve.sh
 ```
 
-Fully spelled out with the **recommended 200K window** for this 256K-native model (set `MAX_MODEL_LEN` explicitly — it is far above the script's 32768 default):
+Wrapper with the **recommended 200K window** for this 256K-native model (set `MAX_MODEL_LEN` explicitly — it is far above the script's 32768 default):
 
 ```bash
 MODEL="Qwen/Qwen3-Coder-30B-A3B-Instruct" \
@@ -33,6 +33,30 @@ MAX_MODEL_LEN=200000 \
 GPU_MEM_UTIL=0.90 \
 TOOL_PARSER="qwen3_coder" \
   ./vllm-serve.sh
+```
+
+Exact vLLM command, including the same log destination as the wrapper:
+
+```bash
+cd self-hosted/vllm
+mkdir -p logs
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export CUDA_HOME=/opt/pytorch/cuda
+export HF_HOME=/opt/dlami/nvme/hf-cache
+export HF_HUB_CACHE="$HF_HOME/hub"
+export VLLM_NO_USAGE_STATS=1
+export DO_NOT_TRACK=1
+
+~/vllm-env/bin/vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \
+  --tensor-parallel-size 4 \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --served-model-name qwen3-coder-30b \
+  --max-model-len 200000 \
+  --gpu-memory-utilization 0.90 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --enable-prefix-caching \
+  2>&1 | tee logs/vllm-serve.log
 ```
 
 ## Why it's the default

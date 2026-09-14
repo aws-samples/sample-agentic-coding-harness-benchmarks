@@ -6,10 +6,10 @@
 
 Serve open-weight coding models (Qwen3-Coder-30B, Qwen3-32B, and larger) on a single multi-GPU EC2 node with [vLLM](https://docs.vllm.ai), sharded across all GPUs with tensor parallelism. This is the serving layer the [hosting-strategy experiment](../../README.md) is built on: vLLM sustains high throughput under concurrent load, which is the regime where a fixed-cost GPU node beats per-token API pricing.
 
-The sibling [../ollama/](../ollama/) path is the *convenience* path — one model, single-stream, minimal setup. **This vLLM path is the *throughput* path** — many concurrent requests, tensor parallelism, the batched tokens/sec the cost model needs.
+**This vLLM path is the *throughput* path** — many concurrent requests, tensor parallelism, the batched tokens/sec the cost model needs.
 
 > **TL;DR — don't copy-paste, run the skill.** The install is heavy (driver-level checks, apt packages, a multi-GB vLLM wheel, a ~57 GB model download, and two environment fixes that are specific to the Deep Learning AMI). Rather than paste the steps below by hand, run the repo skill and it drives the whole thing:
-> 
+>
 > ```
 > /vllm-setup
 > ```
@@ -48,6 +48,7 @@ Weight memory = `params × bytes/param` (BF16 = 2 bytes). On 184 GB of VRAM, aft
 | Qwen3-32B | dense | 32.8B (all) | ~66 GB | ✅ (every param active → ~10× the per-token compute of a 3B-active MoE) |
 | Qwen3.6-35B-A3B | MoE | 35.9B (3B) | ~72 GB | ✅ |
 | Qwen3-Coder-Next | MoE (hybrid Mamba) | 79.6B (3B) | ~160 GB | ✅ tight — reduce `--max-model-len` **and** cap `--max-num-seqs` (Mamba cache), see [model file](models/qwen3-coder-next.md) |
+| Gemma-4-31B-it | dense, multimodal | 31B (all) | ~63 GB | ✅ comfortably (dense → higher per-token compute than a 3B-active MoE); needs vLLM >= 0.25.1 for the `Gemma4ForConditionalGeneration` arch + `gemma4_engine` parser |
 
 ⭐ The default is the **30B-A3B coder MoE**: only 3B parameters activate per token, so it is fast and leaves ~120 GB of VRAM for a large KV cache and high concurrency — exactly what a throughput benchmark wants.
 
@@ -57,6 +58,7 @@ Weight memory = `params × bytes/param` (BF16 = 2 bytes). On 184 GB of VRAM, aft
 - [Qwen3-32B](models/qwen3-32b.md) — dense chat model (`hermes` parser)
 - [Qwen3.6-35B-A3B](models/qwen3.6-35b-a3b.md) — 3.6-generation MoE
 - [Qwen3-Coder-Next (80B)](models/qwen3-coder-next.md) — largest fit, reduced context
+- [Gemma-4-31B-it](models/gemma-4-31b-it.md) — Google's dense, multimodal Gemma 4 (`gemma4_engine` parser)
 
 ---
 
@@ -214,6 +216,44 @@ TOOL_PARSER=none ./vllm-serve.sh
 
 Confirms the server is up, names the served model, sends a prompt, and prints prompt/completion token counts. (This is a single-request smoke test — for sustained batched tokens/sec, use the throughput harness.)
 
+### Three ways to smoke-test once vLLM is up
+
+Once `vllm-serve.sh` reports the server is listening on `127.0.0.1:8000`, here are three quick ways to confirm inference works end to end. All three target the `served-model-name` you launched with — the examples use `qwen3.6-35b`; swap in your own (the default is `qwen3-coder-30b`).
+
+**1. A raw `curl`** against the OpenAI-compatible endpoint — no dependencies, proves the HTTP path:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.6-35b",
+    "messages": [{"role": "user", "content": "What is the square root of 2? Answer in one line."}],
+    "max_tokens": 64
+  }' | python3 -m json.tool
+```
+
+**2. The `hello_inference.py` client** — the "does inference work from Python" smoke test (run `uv sync` first, see [below](#client-test-programs-pyprojecttoml--uv)):
+
+```bash
+uv run clients/hello_inference.py \
+  --model qwen3.6-35b \
+  --prompt "What is the square root of 2? Answer in one line."
+```
+
+**3. Claude Code against the local endpoint** — points the CLI at vLLM's Anthropic-compatible `/v1/messages` route. The inline `--settings` override is required: if your user-level `~/.claude/settings.json` sets `CLAUDE_CODE_USE_BEDROCK=1`, it overrides the environment variables and the request is routed to Amazon Bedrock (which rejects the local model name) instead of to vLLM.
+
+```bash
+ANTHROPIC_BASE_URL="http://127.0.0.1:8000" \
+ANTHROPIC_API_KEY="local" \
+claude -p "What is the square root of 2? Answer in one line." \
+  --model qwen3.6-35b \
+  --output-format json \
+  --max-turns 1 \
+  --settings '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0","ANTHROPIC_BASE_URL":"http://127.0.0.1:8000","ANTHROPIC_API_KEY":"local"}}'
+```
+
+If the response comes back with `"api_error_status": 400` and `The provided model identifier is invalid.`, the request reached Amazon Bedrock rather than vLLM — the `--settings` override above is what forces it local.
+
 ### Run inference yourself
 
 The server speaks the OpenAI API, so any OpenAI-compatible client works. Pass the `served-model-name` (default `qwen3-coder-30b`) as the model. A raw `curl`:
@@ -261,7 +301,7 @@ cd self-hosted/vllm
 # uv is already installed by vllm-install.sh; if you're on a fresh laptop:
 #   curl -LsSf https://astral.sh/uv/install.sh | sh
 
-uv sync                       # creates .venv/ and installs openai, httpx, tiktoken
+uv sync                       # creates .venv/ and installs the locked client dependencies
 ```
 
 `uv sync` reads [`pyproject.toml`](pyproject.toml), resolves a locked set into `.venv/`, and writes `uv.lock` for reproducibility. Then run any client with `uv run` (no need to activate the venv):
@@ -279,19 +319,91 @@ BASE_URL=http://localhost:8000/v1 MODEL=qwen3-coder-30b \
   uv run clients/hello_inference.py
 ```
 
+For repeatable performance runs, use the benchmark client. It measures each streaming request from the client and takes before/after snapshots of vLLM's Prometheus `/metrics` endpoint:
+
+```bash
+uv run clients/benchmark_inference.py \
+  --model qwen3.6-35b \
+  --requests 20 \
+  --concurrency 4 \
+  --warmup 1 \
+  --max-tokens 256 \
+  --run-name qwen36-baseline
+```
+
+The command writes three timestamped files under `benchmark-output/`:
+
+| CSV | Contents |
+|-----|----------|
+| `*-requests.csv` | One row per request: TTFT, TTLT, end-to-end latency, TPOT, queue time, token counts, throughput, finish reason, and error status |
+| `*-server-metrics.csv` | Long-form before/after/delta rows for every `vllm:*` Prometheus sample, including latency histograms, scheduler state, KV-cache use, prefix-cache metrics, and preemptions |
+| `*-summary.csv` | One run row with p50/p90/p95/p99 latency, request and token throughput, failures, and server-side mean latency deltas |
+
+vLLM's OpenTelemetry integration emits traces; its `/metrics` endpoint exposes the Prometheus metrics used here. The benchmark combines server aggregates with exact client-observed request timings. Use `--prompts-file prompts.jsonl` for a workload file containing `{"id":"case-id","prompt":"..."}` objects, and run `uv run clients/benchmark_inference.py --help` for all controls.
+
+### Continuous background metrics
+
+The per-run benchmark snapshots are deliberately bounded. For an independent time series that stays active while coding assistants and other clients send requests, start the DuckDB collector:
+
+```bash
+# Default: scrape every second
+./scripts/vllm-metrics.sh start
+
+# Or lower the resolution for a long-running series:
+METRICS_INTERVAL=5 ./scripts/vllm-metrics.sh start
+
+./scripts/vllm-metrics.sh status
+./scripts/vllm-metrics.sh stop
+```
+
+The default one-second interval stores every `vllm:*` Prometheus sample in `benchmark-output/vllm-metrics.duckdb`. DuckDB compresses repeated metric names and labels and is much more practical than an unbounded CSV. Collection sessions, scrape health, timestamps, durations, and failures are retained alongside metric values.
+
+| DuckDB object | Purpose |
+|---------------|---------|
+| `collector_sessions` | Collector process, endpoint, interval, and start/stop timestamps |
+| `metric_scrapes` | One row per poll, including status, duration, error, and sample count |
+| `metric_samples` | Raw long-form metric name, type, JSON labels, and value |
+| `vllm_metric_samples` | Joined analytics view with timestamps, model name, and engine |
+| `vllm_metric_deltas` | Adds interval deltas for cumulative counters and histogram sums/counts |
+
+Run short, read-only queries while the collector is active; do not leave a separate DuckDB connection open because DuckDB is an embedded database rather than a multi-process database server. The collector opens the database only for brief writes and continues if a foreground query temporarily holds the file lock.
+
+```bash
+uv run python -c 'import duckdb; c=duckdb.connect("benchmark-output/vllm-metrics.duckdb", read_only=True); c.sql("SELECT scraped_at, metric, value, labels FROM vllm_metric_samples ORDER BY scraped_at DESC LIMIT 20").show()'
+```
+
 | Dependency | Why it's here |
 |------------|---------------|
 | `openai` | the OpenAI-compatible client for vLLM's `/v1` endpoint |
 | `httpx` | raw HTTP + async — for streaming and concurrency probes |
 | `tiktoken` | token accounting when comparing cost against API pricing |
+| `prometheus-client` | parse vLLM's Prometheus `/metrics` snapshots |
+| `duckdb` | compressed storage and SQL analytics for continuous metrics |
+| `pytz` | DuckDB timestamp conversion support |
 
 `.venv/` is gitignored; `uv.lock` is committed so the client environment is reproducible.
+
+### Visualize the metrics (HTML dashboard)
+
+`build_dashboard.py` reads the collector's DuckDB and renders a single self-contained HTML file (data embedded inline, no server or CDN) with headline KPI tiles and time-series panels for throughput, concurrency, KV-cache use, request latency, and finish reasons.
+
+```bash
+# Defaults: reads benchmark-output/vllm-metrics.duckdb, writes benchmark-output/dashboard.html
+uv run python -m clients.build_dashboard
+
+# Or point at explicit paths:
+uv run python -m clients.build_dashboard --db benchmark-output/vllm-metrics.duckdb --output benchmark-output/dashboard.html
+```
+
+Open the generated `benchmark-output/dashboard.html` in any browser. It reads the database read-only and combines all collector sessions; regenerate it any time to pick up new scrapes.
 
 ---
 
 ## The serving configuration explained
 
 The defaults in `vllm-serve.sh` are chosen for a throughput benchmark on 4×L40S. Here is what each knob does and what vLLM actually reports at boot on this node.
+
+> **Running notes worth reading before you tune anything:** [serving-optimization-notes.md](../../docs/serving-optimization-notes.md) records the portable, common-sense serving defaults (and why we do NOT tune the prefill knobs per model), and [cost-per-task-methodology.md](../../docs/cost-per-task-methodology.md) explains how cost per token / per task is derived, the two cost lenses, and why agentic coding is prefill-bound and scales horizontally. See also the [agentic coding throughput comparison](../../docs/agentic-coding-throughput-comparison.md).
 
 ### Which kernels are we using?
 
@@ -312,7 +424,7 @@ Each is explained in detail below.
 
 vLLM splits every weight matrix *across* the 4 GPUs, so each card holds ¼ of the model and every GPU participates in every token. This is what lets a 61 GB (or 160 GB) model serve at all on 46 GB cards, and it keeps all four GPUs busy rather than idle-in-a-pipeline.
 
-- **vs. Ollama's pipeline split:** Ollama assigns whole *layers* to different GPUs (pipeline parallelism), so at low concurrency only one GPU is active at a time. Tensor parallelism activates all GPUs per token → higher throughput under load. This is the core reason the vLLM path exists.
+- **vs. pipeline-parallel splits:** pipeline parallelism assigns whole *layers* to different GPUs, so at low concurrency only one GPU is active at a time. Tensor parallelism activates all GPUs per token → higher throughput under load. This is the core reason the vLLM path exists.
 - **Data parallelism** (running N independent model replicas) is *not* used here: one 30B replica already fits with room to spare, and a single replica with a big KV cache maximizes concurrency per model copy. Data parallelism becomes relevant only for very small models where several replicas fit.
 
 On this node vLLM auto-selects the `PYNCCL` all-reduce backend for the 4-GPU group (custom all-reduce is disabled because the L40S GPUs are PCIe-only, not NVLink — expected on G6e).
@@ -398,13 +510,13 @@ Under load you should see all four L40S climb in utilization together (tensor pa
 
 ## Connect a client (SSH tunnel)
 
-The server binds to `127.0.0.1` only. Reach it from your laptop exactly like the Ollama path — an SSH tunnel, no public ingress:
+The server binds to `127.0.0.1` only. Reach it from your laptop with an SSH tunnel, no public ingress:
 
 ```bash
 # on your laptop
 export G6E_IP=<instance-public-ip>
 export G6E_KEY=~/.ssh/<your-key>.pem
-LOCAL_MODEL_PORT=8000 ../ollama/scripts/tunnel.sh start   # forwards localhost:8000 → EC2:8000
+LOCAL_MODEL_PORT=8000 scripts/tunnel.sh start   # forwards localhost:8000 → EC2:8000
 ```
 
 Then point any compatible client at `http://localhost:8000/v1`.
@@ -462,6 +574,31 @@ opencode models vllm               # confirm the provider is wired
 
 Verified working end-to-end on the reference node: opencode's `build` agent driving the self-hosted `qwen3-coder-30b` through vLLM.
 
+## Drive a coding agent: pi
+
+[pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) is another terminal coding agent. Like opencode it speaks the OpenAI-compatible API, so it drives the self-hosted vLLM model through a custom provider. [`run-pi.sh`](scripts/run-pi.sh) discovers the served model id from `/v1/models` and launches pi against it, so you never hand-edit JSON per model:
+
+```bash
+cd self-hosted/vllm/scripts
+
+./run-pi.sh                       # auto-detect the served model, start interactive pi
+./run-pi.sh -p "explain this repo"   # extra args are forwarded straight to pi
+MODEL=glm-5.2 ./run-pi.sh         # override auto-detection
+BASE_URL=http://host:8000/v1 ./run-pi.sh
+```
+
+What it does:
+
+- **Queries `$BASE_URL/models`** and uses the first served model id (override with `MODEL`).
+- **Syncs `~/.pi/agent/models.json`** so the `vllm` provider's `baseUrl` and its single anchor model id match the running server. pi requires a provider to declare at least one model before it registers, but then accepts any `--model` id and passes it straight through. Keeping the anchor id in sync means even a bare `pi` (no wrapper) resolves to the real served model instead of a stale placeholder that 404s.
+- **`exec`s `pi --provider vllm --model <id>`** with your extra args appended.
+
+A reference copy of the provider config lives at [`config/pi-models.json`](config/pi-models.json).
+
+> pi requires Node >= 22.19 (it uses import attributes). On older Node you get `SyntaxError: Unexpected token 'with'`. Install with `npm install -g @earendil-works/pi-coding-agent`.
+
+> **Tool calling must be on**, same as opencode — pi sends `tool_choice: "auto"`. Start vLLM with a tool-call parser (the default in `vllm-serve.sh`), or pi's tools will error.
+
 ---
 
 ## What's inside
@@ -472,11 +609,17 @@ Verified working end-to-end on the reference node: opencode's `build` agent driv
 | [scripts/vllm-install.sh](scripts/vllm-install.sh) | Full install: driver check → apt deps → uv → venv → vLLM → monitoring → GPU verify |
 | [scripts/vllm-serve.sh](scripts/vllm-serve.sh) | Serve a model tensor-parallel across all GPUs; tee's logs; `--foreground` / `--stop` |
 | [scripts/vllm-verify.sh](scripts/vllm-verify.sh) | Smoke-test the endpoint with a real chat completion |
+| [scripts/vllm-metrics.sh](scripts/vllm-metrics.sh) | Start, inspect, or stop the continuous DuckDB metrics collector |
 | [scripts/claude-local.sh](scripts/claude-local.sh) | Launch Claude Code against the vLLM endpoint with temporary settings |
 | [scripts/opencode-setup.sh](scripts/opencode-setup.sh) | Install opencode (if missing) + point it at the vLLM endpoint |
+| [scripts/run-pi.sh](scripts/run-pi.sh) | Launch the pi coding agent against the vLLM endpoint; auto-detects the served model |
 | [clients/hello_inference.py](clients/hello_inference.py) | Minimal Python inference client (openai SDK) |
+| [clients/benchmark_inference.py](clients/benchmark_inference.py) | Concurrent performance benchmark with request, server-metric, and summary CSV output |
+| [clients/collect_metrics.py](clients/collect_metrics.py) | Continuously scrape all vLLM Prometheus metrics into DuckDB |
+| [clients/build_dashboard.py](clients/build_dashboard.py) | Render the collected DuckDB metrics into a self-contained HTML dashboard |
 | [pyproject.toml](pyproject.toml) | `uv`-managed deps for the Python clients |
 | [config/opencode.json](config/opencode.json) | Reference opencode provider config for vLLM |
+| [config/pi-models.json](config/pi-models.json) | Reference pi custom-provider config for vLLM |
 | `logs/` | vLLM server logs (gitignored — never committed) |
 
 > Every script supports `--help` — env vars, defaults, and options.
@@ -491,5 +634,4 @@ aws ec2 terminate-instances --instance-ids <id>           # destroy
 
 ## See also
 
-- [../ollama/README.md](../ollama/README.md) — the single-GPU convenience path
 - [../../README.md](../../README.md) — the multi-model project and the cost/quality experiment

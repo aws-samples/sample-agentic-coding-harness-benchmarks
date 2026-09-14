@@ -18,7 +18,11 @@
 
 ## Serve it
 
+**Benchmarked config:** instance `p5en.48xlarge` (8×H200 141GB) · **TP=8** (all 8 GPUs) · precision **FP8** (`zai-org/GLM-5.2-FP8`) · 300000 (300K) window.
+
 GLM-5.2-FP8 on 8×H200 (p5en.48xlarge). The model requires `--trust-remote-code` and benefits from setting `CUDA_HOME` explicitly for DeepGemm kernel JIT compilation.
+
+> **Verified on this repo's p5en.48xlarge node (2026-07):** the "Serve it" block below is correct as-is, but the DLAMI here has **no `/usr/local/cuda`** (nvcc lives at `/opt/pytorch/cuda`), and GLM-5.2's FP8 path JIT-compiles a FlashInfer kernel that needs `ninja` on PATH plus **three** unversioned CUDA libs (`libcudart.so`, `libcuda.so`, **`libnvrtc.so`**) in `$CUDA_HOME/lib64`. Export the environment from [`.claude/skills/vllm-setup/p5en-h200-cuda-fixes.md`](../../../.claude/skills/vllm-setup/p5en-h200-cuda-fixes.md) (Fixes 1+2+3) **before** running the command below, or the server fails at engine init with `cannot find -lnvrtc`. The CUDA_HOME/libcudart tips in "Tuning notes" below assume a different DLAMI layout (`/usr/local/cuda`) and do not apply to this node.
 
 ```bash
 MODEL="zai-org/GLM-5.2-FP8" \
@@ -36,6 +40,8 @@ EXTRA_ARGS="--trust-remote-code" \
 Or the raw vLLM command (what actually runs on the instance):
 
 ```bash
+cd self-hosted/vllm
+mkdir -p logs
 export CUDA_HOME=/usr/local/cuda
 export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
@@ -50,7 +56,8 @@ vllm serve zai-org/GLM-5.2-FP8 \
   --enable-auto-tool-choice --tool-call-parser glm47 \
   --reasoning-parser glm47 \
   --enable-prefix-caching \
-  --trust-remote-code
+  --trust-remote-code \
+  2>&1 | tee logs/vllm-serve.log
 ```
 
 ## Instance and access
@@ -59,7 +66,7 @@ vllm serve zai-org/GLM-5.2-FP8 \
 |---|---|
 | **Instance type** | p5en.48xlarge (8×H200 141GB, 1.13 TB VRAM) |
 | **Region** | us-east-2 |
-| **Cost** | ~$85/hr on-demand, ~$55/hr via capacity block |
+| **Cost** | ~$63.30/hr on-demand (AWS Price List API, us-east-1; see [pricing.json](../pricing.json)), lower via capacity block |
 | **SSH** | `ssh -i ~/.ssh/qwen36-key.pem ubuntu@<IP>` |
 | **Tunnel** | `ssh -i ~/.ssh/qwen36-key.pem -L 8000:127.0.0.1:8000 ubuntu@<IP>` |
 
@@ -90,8 +97,8 @@ Uses the `glm47` parser. Tool calls are returned as structured `tool_use` blocks
 
 ## Tuning notes
 
-- **DeepGemm JIT:** GLM-5.2 uses DeepGemm kernels that require `nvcc` at runtime. Ensure `CUDA_HOME` points to a valid CUDA installation with `bin/nvcc`. On the Ubuntu 24.04 DLAMI, this is `/usr/local/cuda`.
-- **libcudart:** FlashInfer JIT also needs `libcudart.so` in the linker path. If you hit `cannot find -lcudart`, run: `sudo ln -sf /usr/local/cuda/lib64/libcudart.so /usr/lib/x86_64-linux-gnu/libcudart.so`
+- **DeepGemm JIT:** GLM-5.2 uses DeepGemm kernels that require `nvcc` at runtime. Ensure `CUDA_HOME` points to a valid CUDA installation with `bin/nvcc`. On some Ubuntu 24.04 DLAMIs this is `/usr/local/cuda`; **on this repo's p5en node it is `/opt/pytorch/cuda` (there is no `/usr/local/cuda`)** — see the p5en fixes doc linked above.
+- **libcudart / libcuda / libnvrtc:** FlashInfer's FP8-kernel JIT links against all three, and needs unversioned `.so` names on a path its build command searches (`$CUDA_HOME/lib64` + `stubs`). If you hit `cannot find -lcudart`, `-lcuda`, or `-lnvrtc`, do **not** just symlink libcudart into `/usr/lib` — follow Fixes 2+3 in [`p5en-h200-cuda-fixes.md`](../../../.claude/skills/vllm-setup/p5en-h200-cuda-fixes.md), which create all three symlinks in the right place. (`-lnvrtc` in particular is GLM-5.2/FP8-specific; Kimi does not hit it.)
 - **Download speed:** The FP8 model is ~750 GB (282 safetensor files). Without `HF_TOKEN`, downloads are rate-limited. Set a token for faster downloads.
 - **Startup time:** First boot takes ~15–20 minutes (download + weight loading + torch.compile + CUDA graph capture). Subsequent boots (weights cached) take ~5–8 minutes.
 - **Prefix caching:** Enabled by default. Very effective for `/swe` and `/implement` benchmarks where the system prompt + skill instructions are constant across turns.

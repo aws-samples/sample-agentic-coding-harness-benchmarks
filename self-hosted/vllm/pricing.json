@@ -1,0 +1,52 @@
+{
+  "_comment": "Single source of truth for EC2 pricing used to derive cost-per-token / cost-per-task. `dollars_per_hour` IS the rate a run is charged, prorated by tp/gpus_per_instance for a partial-box (TP < gpus) run -- see pricing.py resolve(). Every instance is based at its 3-YEAR COMMITMENT RATE, so cost comparisons across the instance line are apples-to-apples. There is deliberately NO discount multiplier: a placeholder discount on an on-demand base reads like a measured price but is an assumption, so the base is now always a real published rate and `rates` records the alternatives. To price at a different commitment term, move that value from `rates` into `dollars_per_hour`, update `_rate_basis`, and regenerate the throughput summaries + charts (clients/reprice_performance_summary.py); do not hardcode prices in scripts.",
+  "currency": "USD",
+  "region": "us-east-1",
+  "as_of": "2026-09-01",
+  "instances": {
+    "g6e.12xlarge": {
+      "dollars_per_hour": 4.533,
+      "gpus_per_instance": 4,
+      "gpu": "L40S",
+      "rates": {
+        "on_demand": 10.493,
+        "commit_1yr": 6.61,
+        "commit_3yr": 4.533
+      },
+      "_rate_basis": "3-year commitment rate (Standard RI or the equivalent EC2 Instance Savings Plan -- AWS prices both in its up-to-72%-off tier, so the instrument does not move the rate)"
+    },
+    "g6e.4xlarge": {
+      "dollars_per_hour": 1.298,
+      "gpus_per_instance": 1,
+      "gpu": "L40S",
+      "rates": {
+        "on_demand": 3.004,
+        "spot": 2.764,
+        "commit_1yr": 1.893,
+        "commit_3yr": 1.298
+      },
+      "_rate_basis": "3-year commitment rate (Standard RI or the equivalent EC2 Instance Savings Plan). Same basis as g6e.12xlarge, and the same ratios to on-demand (1-yr 63%, 3-yr 43%)."
+    },
+    "p5en.48xlarge": {
+      "dollars_per_hour": 27.72,
+      "gpus_per_instance": 8,
+      "gpu": "H200",
+      "rates": {
+        "on_demand": 63.296,
+        "commit_1yr": 40.43,
+        "commit_3yr": 27.72
+      },
+      "_rate_basis": "3-year EC2 Instance Savings Plan rate. Replaces an earlier on-demand base carrying a 0.35 PLACEHOLDER discount ($41.1424/hr effective), which was a guess presented in the same field as a measured price. These are published rates, and they sit at the same ratios to on-demand as g6e (1-yr 40.43/63.296 = 63.9%, 3-yr 27.72/63.296 = 43.8%), so the whole fleet is now based at one commitment term."
+    },
+    "p6-b300.48xlarge": {
+      "dollars_per_hour": 94.91,
+      "gpus_per_instance": 8,
+      "gpu": "B300",
+      "rates": {
+        "compute_savings_plan_1yr": 104.68,
+        "compute_savings_plan_3yr": 94.91
+      },
+      "_rate_basis": "3-year Compute Savings Plan rate (us-east-1). Upfront: $2,494,130.21 / (3 * 8760h) = $94.91/hr. 1-year upfront: $916,959.66 / 8760h = $104.68/hr. dollars_per_hour set to the 3-year Savings Plan rate to match the commitment-term basis used for all other instances in this file."
+    }
+  }
+}
