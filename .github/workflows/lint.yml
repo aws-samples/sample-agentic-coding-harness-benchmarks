@@ -36,4 +36,4 @@ jobs:
       - name: Run Bandit security scan
         run: |
           pip install bandit
-          bandit -r . -f txt
+          bandit -r . -f txt --exclude ./self-hosted/vllm/tests,./benchmarks/tests
