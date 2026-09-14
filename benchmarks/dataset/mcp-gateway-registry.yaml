@@ -1,0 +1,257 @@
+# =============================================================================
+# SWE benchmark dataset
+# =============================================================================
+#
+# A dataset is a metadata header plus a list of software-engineering tasks. A
+# harness drives a coding assistant (Claude Code, or any agent) through each
+# task NON-INTERACTIVELY via the /swe skill, which lands four design artifacts
+# on disk (github-issue.md, lld.md, review.md, testing.md). A separate review
+# pass scores those artifacts, and the harness records per-run instrumentation
+# (see `metrics` below).
+#
+# -----------------------------------------------------------------------------
+# Schema
+# -----------------------------------------------------------------------------
+# Top level:
+#   schema_version   str    Version of THIS file format (not the data).
+#   name             str    Machine-friendly dataset id (kebab-case).
+#   title            str    Human-readable dataset name.
+#   description      str    What the dataset covers and how it is meant to run.
+#   created          date   ISO date the dataset was authored (YYYY-MM-DD).
+#   default_ref      str    Git ref (tag/branch/commit) a task clones when it
+#                           does not set its own `ref`. Pin for reproducibility.
+#   metrics          list   Per-run signals the harness is expected to collect.
+#                           Documentary only: actual values live in run outputs,
+#                           never in this file.
+#   complexity_levels list  Allowed values for a task's `complexity` field.
+#   tasks            list   The tasks (schema below).
+#
+# Per task:
+#   id                 str   Stable slug; also the output subdirectory name.
+#   repo               str   HTTPS URL of the repo the agent clones.
+#   ref                str   Optional. Git ref for THIS task; defaults to
+#                            `default_ref`. Always pin so runs are reproducible.
+#   complexity         str   One of `complexity_levels`.
+#   tags               list  Free-form labels for slicing results (domain,
+#                            language, change type, AWS service, ...).
+#   problem_statement  str   Optional*. Multi-line description of the task, in
+#                            enough detail for an agent to act without the repo
+#                            author present.
+#   problem_issue_url  str   Optional*. Canonical GitHub issue the task derives
+#                            from. When both this and problem_statement are
+#                            present, the statement is authoritative and the URL
+#                            is the source of record.
+#                            (* at least ONE of the two must be present.)
+#   clarifying_answers str   Optional. Pre-supplied answers to the questions the
+#                            /swe skill would otherwise ask, so the run stays
+#                            fully non-interactive. Passed through to the skill.
+#   ground_truth       map   Optional. Reviewer-facing notes on the intended
+#                            solution. NOT given to the agent. Sub-fields:
+#                              approach      str   How the change is meant to be made.
+#                              expectations  list  Points a correct design covers.
+#                              reference_url str   How upstream actually resolved it,
+#                                                  if known (PR/commit/issue).
+# =============================================================================
+
+schema_version: "1.0"
+name: mcp-gateway-registry-swe
+title: MCP Gateway Registry - SWE design tasks
+description: >-
+  Software-engineering design tasks drawn from real upstream issues in the
+  agentic-community/mcp-gateway-registry project. Each task drives a coding
+  assistant through the /swe skill non-interactively to produce four design
+  artifacts, which are then scored by a separate review pass. Runs are
+  instrumented for token usage, latency, and the number of LLM turns the agent
+  took.
+created: 2026-07-22
+default_ref: "1.24.4"
+
+metrics:
+  - input_tokens          # prompt tokens sent to the model across the run
+  - output_tokens         # completion tokens generated across the run
+  - cache_read_tokens     # prompt tokens served from cache (if reported)
+  - cache_creation_tokens # prompt tokens written to cache (if reported)
+  - latency_seconds       # wall-clock time for the run
+  - num_turns             # LLM calls (turns) the agent made to complete the task
+
+complexity_levels:
+  - low
+  - medium
+  - high
+
+tasks:
+  - id: remove-faiss
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.4"
+    complexity: medium
+    tags: [dependency-removal, python, fastapi, search, docker, docs]
+    problem_statement: |
+      Remove FAISS from the codebase and documentation. FAISS is obsolete in
+      this repo. Delete all FAISS imports, dependencies, configuration, and
+      references in docs. Replace any remaining vector-search needs with the
+      maintained DocumentDB hybrid search alternative already used elsewhere in
+      the repo. The change must not break existing search behaviour.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1285
+    clarifying_answers: |
+      1. FAISS replaced by DocumentDB native hybrid search. FAISS is an
+         unnecessary dependency complicating deployment.
+      2. Operators (no more FAISS native-lib headaches) and developers (simpler
+         codebase). End-users are unaffected.
+      3. Python/FastAPI. Must not break existing search. No deadline.
+      4. Medium - remove FAISS code paths, dependencies, Docker build steps, and
+         tests.
+    ground_truth:
+      approach: >-
+        Remove FAISS end to end (imports, code paths, dependency declarations,
+        Docker build steps, tests, and docs) and route any remaining
+        vector-search need through the existing DocumentDB hybrid search.
+      expectations:
+        - Identifies every FAISS import and code path, not just the obvious ones.
+        - Removes FAISS from dependency manifests and the Docker build.
+        - Preserves existing search behaviour via the DocumentDB alternative.
+        - Updates or removes FAISS-specific tests and documentation.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1285
+
+  - id: remove-efs-from-terraform-aws-ecs
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.4"
+    complexity: medium
+    tags: [terraform, aws, ecs, storage, infrastructure]
+    problem_statement: |
+      Remove EFS from terraform/aws-ecs/. EFS is obsolete in this deployment;
+      the application uses S3/DocumentDB for all persistent storage. Delete the
+      EFS file system, mount targets, security groups, and any task-definition
+      volume mounts that reference it. Update variables.tf,
+      terraform.tfvars.example, and module wiring. Verify that terraform
+      validate and terraform plan still succeed.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1286
+    clarifying_answers: |
+      1. EFS is no longer needed - the application uses S3/DocumentDB for all
+         persistent storage. EFS adds cost and complexity.
+      2. Operators deploying via Terraform.
+      3. Terraform/AWS ECS. Must ensure no service depends on the EFS mount.
+         No deadline.
+      4. Medium - remove EFS resources from Terraform and remove the
+         volume/mount config from the ECS task definitions.
+    ground_truth:
+      approach: >-
+        Delete the EFS file system, mount targets, and security groups from the
+        Terraform, strip the corresponding volume mounts out of the ECS task
+        definitions, and clean up the now-unused variables and module wiring.
+      expectations:
+        - Confirms no running service still depends on the EFS mount.
+        - Removes EFS resources AND the task-definition volume/mount references.
+        - Cleans up variables.tf, terraform.tfvars.example, and module outputs.
+        - Keeps terraform validate and terraform plan green.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1286
+
+  - id: ssrf-hardening-outbound-url-validation
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.4"
+    complexity: medium
+    tags: [security, ssrf, python, fastapi, input-validation]
+    problem_statement: |
+      SSRF hardening: validate outbound URLs on the agent-card fetch and health
+      check endpoints. The registry fetches user-supplied URLs with no SSRF
+      guard on the agent-card and health-check paths, even though a guard
+      (_is_safe_url) already exists for SKILL.md fetches. Identify the vulnerable
+      endpoints that make outbound HTTP requests based on user-supplied URLs,
+      propose URL validation (deny internal/private IPs, allowlists), and design
+      input sanitization to prevent SSRF attacks. Must be backwards-compatible.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1282
+    clarifying_answers: |
+      1. Security audit finding - the registry fetches user-supplied URLs (agent
+         card, health checks) with no SSRF guard. An existing guard exists for
+         skill fetches but is not reused elsewhere.
+      2. Both - operators running the gateway and downstream teams registering
+         MCP servers.
+      3. Python/FastAPI, runs on ECS, no deadline. Must be backwards-compatible.
+      4. Medium - promote the existing _is_safe_url() into a shared utility,
+         apply it to the agent-card fetch and server health-check paths, and add
+         config for an allowlist.
+    ground_truth:
+      approach: >-
+        Promote the existing _is_safe_url() guard into a shared utility and apply
+        it uniformly to every outbound-fetch path (agent card, health checks),
+        blocking internal/private IP ranges with an optional configurable
+        allowlist.
+      expectations:
+        - Enumerates ALL endpoints that fetch user-supplied URLs, not only the
+          named ones.
+        - Reuses the existing guard rather than duplicating validation logic.
+        - Covers SSRF edge cases (private IPs, DNS rebinding, redirects).
+        - Remains backwards-compatible and adds an allowlist configuration knob.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1282
+
+  - id: migrate-ecs-env-vars-to-secrets-manager
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.4"
+    complexity: high
+    tags: [security, aws, secrets-manager, terraform, ecs, iam]
+    problem_statement: |
+      Migrate sensitive ECS environment variables to AWS Secrets Manager.
+      Identify which env vars in the ECS task definitions contain secrets (DB
+      passwords, API keys, OAuth client secrets, admin passwords), create
+      Secrets Manager resources in Terraform, update the ECS task definitions to
+      pull from Secrets Manager via the `secrets` block instead of passing
+      plaintext via `environment`, and update the IAM task execution role to
+      allow reading those secrets. Keep the plaintext env-var path as a fallback
+      during migration.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1134
+    clarifying_answers: |
+      1. Plaintext secrets are stored as ECS environment variables in Terraform
+         - a security risk. Moving to Secrets Manager adds encryption, rotation,
+         and an audit trail.
+      2. Operators deploying the registry on AWS ECS + Terraform.
+      3. Terraform/ECS setup in this repo. No Helm/EKS needed. No deadline.
+      4. All sensitive env vars across all ECS services.
+      5. AWS Secrets Manager only - rotation support and cross-account access.
+      6. Keep the plaintext env-var as a fallback during migration.
+      7. Medium - Terraform across all ECS services plus app config-loader
+         changes.
+    ground_truth:
+      approach: >-
+        Classify which env vars are secrets, create Secrets Manager resources in
+        Terraform, switch the ECS task definitions to the `secrets` block, and
+        grant the task execution role read access - keeping plaintext as a
+        migration fallback.
+      expectations:
+        - Correctly identifies secret vs non-secret environment variables.
+        - Uses the ECS `secrets` block (not custom boto3 code) to inject values.
+        - Updates the IAM task execution role with least-privilege secret reads.
+        - Provides a backwards-compatible fallback and a cutover plan.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1134
+
+  - id: replace-keycloak-db-password-with-rds-iam
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.4"
+    complexity: high
+    tags: [security, aws, rds, iam, keycloak, terraform]
+    problem_statement: |
+      Replace the Keycloak database password with RDS IAM authentication. The
+      repo uses an Aurora MySQL cluster for Keycloak; remove static DB
+      credentials from Terraform and ECS config, enable IAM database
+      authentication on the Aurora MySQL cluster, update the Keycloak ECS task to
+      generate short-lived IAM auth tokens via rds:GenerateDBAuthToken, and
+      update IAM roles/policies accordingly. Password auth must remain available
+      as a feature-flagged fallback.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1303
+    clarifying_answers: |
+      1. Switch Keycloak's RDS connection from a static username/password to RDS
+         IAM authentication. Remove the static password from config entirely.
+      2. Operators deploying on AWS ECS + RDS (Terraform). No Helm/EKS needed.
+      3. Must remain backwards-compatible with password auth as a fallback
+         (feature flag). No Keycloak version change. No deadline.
+      4. Medium.
+    ground_truth:
+      approach: >-
+        Enable IAM database authentication on the Aurora MySQL cluster, have the
+        Keycloak ECS task mint short-lived tokens via rds:GenerateDBAuthToken,
+        and remove static credentials from Terraform/ECS - behind a feature flag
+        that can fall back to password auth.
+      expectations:
+        - Enables IAM auth on the Aurora cluster and wires the token generation.
+        - Removes static DB credentials from Terraform and ECS config.
+        - Grants the correct rds-db:connect IAM permissions to the task role.
+        - Keeps a feature-flagged password-auth fallback for safe cutover.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1303
