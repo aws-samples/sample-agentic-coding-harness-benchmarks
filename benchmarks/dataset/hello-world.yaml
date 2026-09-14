@@ -1,0 +1,61 @@
+# =============================================================================
+# SWE benchmark dataset - hello-world sanity check
+# =============================================================================
+#
+# A deliberately trivial dataset for kicking the tires: one tiny, well-known
+# public repo and one simple, design-able task. Use it to confirm the whole
+# harness path is sane - clone at a ref, drive claude -p through /swe, land the
+# four artifacts, and capture metrics - before running the real dataset.
+#
+# See dataset/mcp-gateway-registry.yaml for the full schema documentation.
+# =============================================================================
+
+schema_version: "1.0"
+name: hello-world-sanity
+title: Hello World - environment sanity check
+description: >-
+  A single trivial task against a minimal public repo, used only to verify the
+  benchmark environment end to end (clone, claude -p, /swe artifacts, metrics).
+  Not a real quality benchmark.
+created: 2026-07-22
+default_ref: master
+
+metrics:
+  - input_tokens
+  - output_tokens
+  - cache_read_tokens
+  - cache_creation_tokens
+  - latency_seconds
+  - num_turns
+
+complexity_levels:
+  - low
+  - medium
+  - high
+
+tasks:
+  - id: add-contributing-guide
+    repo: https://github.com/octocat/Hello-World
+    ref: master
+    complexity: low
+    tags: [sanity-check, docs, hello-world]
+    problem_statement: |
+      Add a CONTRIBUTING.md guide to this repository. The repo currently has
+      only a README and no guidance for contributors. Design a short
+      CONTRIBUTING.md that explains how to file an issue, how to open a pull
+      request, and the basic expectations for a contribution. This is a
+      documentation-only change - no build system, tests, or code are involved.
+    clarifying_answers: |
+      1. Contributors have nowhere to look for how to contribute; a
+         CONTRIBUTING.md is the standard place.
+      2. New and returning open-source contributors to the repo.
+      3. Markdown only. No language/framework/deadline constraints.
+      4. Low - a single new documentation file.
+    ground_truth:
+      approach: >-
+        Add a single CONTRIBUTING.md at the repo root covering issue filing,
+        the pull-request flow, and contribution expectations. No code changes.
+      expectations:
+        - Proposes a single new CONTRIBUTING.md, not code changes.
+        - Covers filing issues and opening pull requests.
+        - Keeps scope to documentation only.

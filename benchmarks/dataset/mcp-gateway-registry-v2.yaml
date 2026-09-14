@@ -1,0 +1,1128 @@
+# =============================================================================
+# SWE benchmark dataset - MCP Gateway Registry, v2
+# =============================================================================
+#
+# A dataset is a metadata header plus a list of software-engineering tasks. A
+# harness drives a coding assistant (Claude Code, or any agent) through each
+# task NON-INTERACTIVELY via the /swe family of skills, which lands the design
+# artifacts (and, for /swe2 and /swe3, a patch) on disk. A separate review pass
+# scores those artifacts, and the harness records per-run instrumentation
+# (see `metrics` below).
+#
+# The schema is identical to dataset/mcp-gateway-registry.yaml; it is
+# documented in full in benchmarks/docs/harness-reference.md.
+#
+# -----------------------------------------------------------------------------
+# What is different about v2
+# -----------------------------------------------------------------------------
+# 1. Every task is drawn from a real, CLOSED upstream issue that shipped in a
+#    named release: v1.0.20, v1.0.21, v1.0.22, 1.24.0, 1.25.0, 1.26.0, 1.28.0,
+#    or 1.29.0. (The upstream tags for the 1.20/1.21/1.22 line are literally
+#    named `v1.0.20`, `v1.0.21`, and `v1.0.22`.)
+#
+# 2. Each task's `ref` pins the release IMMEDIATELY BEFORE the one that fixed
+#    it, so the defect or the missing feature is actually present in the tree
+#    the agent clones. This is the key difference from v1, where every task
+#    shared one ref. The `fixed_in` tag on each task records the release the
+#    upstream fix shipped in.
+#
+# 3. The 21 tasks span four complexity tiers (5 trivial / 5 low / 6 medium /
+#    5 high) so results can be sliced by complexity, and they span the full
+#    surface of the project:
+#    Python/FastAPI backend, React frontend, nginx templating, bash setup
+#    scripts, Docker/Compose, Terraform, Helm, and the CLI.
+#
+# 4. `output_scope` gives this dataset its own results folder. Results live at
+#    <model>/<harness>/<skill>/<scope>/<task>/, and the scope defaults to the
+#    repository name -- which both datasets share, since they target the same
+#    repo. Without this, a v2 run would land beside the v1 tasks and the
+#    folder-level run-summary.json would be rebuilt over both, silently blending
+#    two different task sets into one mean. v1 and v2 scores are NOT comparable
+#    (different tasks, different refs, different difficulty mix), so they must
+#    not share a folder.
+#
+# `ground_truth` records how upstream actually resolved each issue. It is
+# reviewer-facing only and is NEVER given to the agent.
+# =============================================================================
+
+schema_version: "1.0"
+name: mcp-gateway-registry-swe-v2
+title: MCP Gateway Registry - SWE tasks v2 (release-sourced, complexity-balanced)
+description: >-
+  Fifteen software-engineering tasks drawn from real closed issues in the
+  agentic-community/mcp-gateway-registry project, taken from the v1.0.20,
+  v1.0.21, v1.0.22, 1.24.0, 1.25.0, 1.26.0, 1.28.0, and 1.29.0 releases. Each
+  task pins the release tag immediately before the fix landed, so the agent
+  clones a tree in which the bug or gap is genuinely present. Five tasks each at
+  low, medium, and high complexity. Runs are instrumented for token usage,
+  latency, and the number of LLM turns the agent took.
+created: 2026-08-25
+default_ref: "1.29.0"
+# Results folder name, keeping this dataset's runs out of v1's (see above).
+output_scope: mcp-gateway-registry-v2
+
+metrics:
+  - input_tokens          # prompt tokens sent to the model across the run
+  - output_tokens         # completion tokens generated across the run
+  - cache_read_tokens     # prompt tokens served from cache (if reported)
+  - cache_creation_tokens # prompt tokens written to cache (if reported)
+  - latency_seconds       # wall-clock time for the run
+  - num_turns             # LLM calls (turns) the agent made to complete the task
+
+complexity_levels:
+  # "trivial" sits below "low": a change a competent engineer makes without
+  # designing anything -- a docs page, a render condition, two env passthroughs,
+  # a version check. It exists to test whether the gap between models closes
+  # when the work is small enough. On low/medium/high the opus-haiku gap is a
+  # flat 19-21 points, so this tier is where convergence would show up if it
+  # happens at all.
+  - trivial
+  - low
+  - medium
+  - high
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # LOW COMPLEXITY (5)
+  # ---------------------------------------------------------------------------
+
+  - id: default-create-in-idp-checkbox-unchecked
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "v1.0.21"
+    complexity: low
+    tags: [ui, react, iam, groups, ux, fixed-in-1.0.22]
+    problem_statement: |
+      In the registry web UI, the IAM -> Groups creation form has a "Create in
+      identity provider" checkbox that is CHECKED by default. That default is
+      wrong: creating a group in the registry should not also create it in the
+      configured identity provider unless the operator explicitly asks for it.
+      An operator who fills in the form and clicks Create without noticing the
+      checkbox silently mutates their IdP, and on deployments where the admin
+      lacks IdP write scopes the create fails outright.
+
+      Change the default so the checkbox starts UNCHECKED, meaning a group is
+      created local-only unless the operator opts in. Find the group-creation
+      form component and any state initialization, request payload default, or
+      backend default that feeds it, and make the local-only path the default
+      consistently. Operators who do want IdP creation must still be able to
+      tick the box and get the existing behaviour. Cover the change with a
+      frontend test that asserts the initial checked state.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/916
+    clarifying_answers: |
+      1. The "Create in identity provider" checkbox under IAM -> Group creation
+         defaults to checked; it should default to unchecked so groups are
+         local-only unless the operator opts in.
+      2. Registry administrators using the IAM screens.
+      3. React/TypeScript frontend with a FastAPI backend. No deadline.
+      4. Low - a default-value change in the group creation form, plus a test.
+    ground_truth:
+      approach: >-
+        Flip the initial state of the create_in_idp checkbox in the IAM group
+        creation form from true to false so a newly created group is local-only
+        by default, keeping the opt-in path unchanged.
+      expectations:
+        - Locates the group-creation form component and the state that seeds the checkbox.
+        - Changes the default to unchecked without removing the opt-in capability.
+        - Checks whether any request payload or backend default also assumes true.
+        - Adds or updates a test asserting the checkbox starts unchecked.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/921
+
+  # Re-tiered low -> medium after the first three-model run: haiku, sonnet and
+  # opus all scored it worst-in-tier at low, and in every case the collapse was
+  # the implementation artifact (25 / 31 / 58) while the design artifacts held.
+  # Three independent models failing the same way is a mislabel, not variance --
+  # the task touches two Dockerfiles, the lockfile flow and the build caching.
+  - id: build-docker-images-from-uv-lock
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.23.0"
+    complexity: medium
+    tags: [docker, build, uv, dependencies, reproducibility, ci, fixed-in-1.24.0]
+    problem_statement: |
+      Docker builds do not use the repository's uv lockfiles. docker/Dockerfile.auth
+      and docker/Dockerfile.registry install dependencies with
+      `uv pip install --requirement pyproject.toml`, which resolves fresh at build
+      time, so two builds of the same commit can ship different dependency
+      versions. On top of that, several sub-projects have no lockfile at all -
+      `auth_server/` and three of the `servers/*` directories.
+
+      Close all three gaps:
+        1. Generate the missing lockfiles so every project root that is installed
+           in a Docker image has a `uv.lock`.
+        2. Change the Dockerfiles to install from the lock (`uv sync --frozen` or
+           `uv sync --locked`) so a build fails loudly when the lock does not
+           match the project rather than silently resolving something new.
+        3. Add a CI check that runs `uv lock --check` in each project root so a
+           pyproject.toml edit that is not accompanied by a re-lock fails the
+           build.
+      Images must still build and run exactly as before.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1022
+    clarifying_answers: |
+      1. Docker builds resolve dependencies at build time instead of installing
+         from uv.lock, so builds are not reproducible and some sub-projects have
+         no lockfile at all.
+      2. Maintainers and operators building or consuming the container images.
+      3. Python with uv, Docker multi-stage builds, GitHub Actions CI. No deadline.
+      4. Low - generate the missing locks, switch the Dockerfiles to `uv sync
+         --frozen`, and add a `uv lock --check` CI job.
+    ground_truth:
+      approach: >-
+        Run `uv lock` in each project root that lacks a lockfile, replace the
+        `uv pip install --requirement pyproject.toml` steps in the Dockerfiles
+        with a locked `uv sync --frozen`, and add a CI job that runs
+        `uv lock --check` per project root.
+      expectations:
+        - Enumerates every project root installed by a Dockerfile, not just the two named.
+        - Uses a locked install (`uv sync --frozen`/`--locked`) that fails on drift.
+        - Keeps the Docker layer caching and build stages working.
+        - Adds the CI guard so lockfiles cannot silently go stale.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1024
+
+  - id: honor-cloud-provider-override-in-ui
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.7"
+    complexity: low
+    tags: [bug, telemetry, api, ui, deployment, fixed-in-1.25.0]
+    problem_statement: |
+      The registry UI misreports the deployment cloud. On a local (on-premises)
+      install the UI's Uptime tooltip shows Deployment -> Cloud = "aws (via env)",
+      because the cloud-detection cascade returns `aws` whenever AWS_REGION or
+      AWS_DEFAULT_REGION is set - and `.env.example` ships `AWS_REGION=us-east-1`,
+      so every local install trips it.
+
+      An operator override already exists (`MCP_CLOUD_PROVIDER`, allowed values
+      aws|azure|gcp|on_premises|other) and telemetry EVENTS already honour it:
+      they correctly report `on_premises (method=explicit)`. The UI does not,
+      because the endpoint it reads calls the raw detection cascade rather than
+      the resolved value that applies the override.
+
+      Fix the display path so the UI reports the same cloud the telemetry events
+      report. Keep the change backwards compatible: when the override is unset,
+      the endpoint must still fall through to the existing auto-detection
+      cascade. Add a regression test covering the override-set and override-unset
+      cases.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1306
+    clarifying_answers: |
+      1. The UI cloud-detection display ignores the MCP_CLOUD_PROVIDER operator
+         override, so local installs are misclassified as AWS purely because
+         AWS_REGION is set.
+      2. Operators running the registry outside AWS, and anyone reading the
+         deployment telemetry.
+      3. Python/FastAPI backend feeding a React UI. Must stay backwards
+         compatible. No deadline.
+      4. Low - the display endpoint should return the resolved cloud value
+         rather than the raw detection cascade.
+    ground_truth:
+      approach: >-
+        Change GET /api/system/telemetry-detection in registry/api/system_routes.py
+        to return the resolved value from `_resolve_cloud()` (which applies the
+        MCP_CLOUD_PROVIDER override and the registry-card hint) instead of the raw
+        `_detect_cloud_provider_with_method()` cascade.
+      expectations:
+        - Identifies that the display endpoint and the telemetry events use different resolvers.
+        - Routes the display endpoint through the override-aware resolver.
+        - Preserves the auto-detection fallback when the override is unset.
+        - Notes that AWS_REGION may legitimately remain set for the AWS SDK.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1307
+
+  - id: fix-reserved-groups-var-in-service-account-script
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: low
+    tags: [bug, bash, keycloak, setup-scripts, shellcheck, fixed-in-1.28.0]
+    problem_statement: |
+      keycloak/setup/setup-agent-service-account.sh exits 1 after a run that
+      actually succeeded, and prints no error. By the time it fails, the M2M
+      client, the service account, the group membership, and the groups protocol
+      mapper have all been created correctly - but the non-zero exit makes every
+      caller treat the setup as failed, and the macos-setup skill halts a setup
+      that in fact worked.
+
+      The failure is in verify_setup(): it captures the service account's group
+      list into a variable named GROUPS. GROUPS is a special bash variable (an
+      array of the caller's numeric supplementary group IDs), so assigning a
+      scalar string to it fails, and the script runs under `set -e`, so it aborts
+      before the next line ever runs. shellcheck flags it as SC2178 plus two
+      SC2128 warnings - the SC2128 warnings mean the subsequent membership check
+      is also latently wrong, comparing against only the first array element.
+
+      Fix the script so it exits 0 on success, prints the verification output,
+      and checks group membership against the real group names. Then sweep the
+      setup scripts for any other assignment to a bash reserved variable.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1570
+    clarifying_answers: |
+      1. setup-agent-service-account.sh assigns to the reserved bash variable
+         GROUPS inside verify_setup(), which fails under `set -e` and makes a
+         successful setup exit 1 with no message.
+      2. Operators running the Keycloak setup scripts, and the macos-setup skill
+         that shells out to them.
+      3. Bash (must work on macOS bash 3.2 as well as bash 5.x), Keycloak 26.x.
+         No deadline.
+      4. Low - rename the variable, scope it local, and fix the membership check
+         that relied on it.
+    ground_truth:
+      approach: >-
+        Rename the GROUPS variable in verify_setup() to a non-reserved name and
+        declare it `local`, quote its expansion so the membership grep sees all
+        group names, and confirm no other setup script assigns to a bash reserved
+        variable.
+      expectations:
+        - Explains why the assignment fails (reserved array variable plus `set -e`).
+        - Renames and scopes the variable rather than disabling `set -e`.
+        - Fixes the latent SC2128 bug in the membership check, not just the exit code.
+        - Greps the other setup scripts for the same class of bug and reports the result.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1583
+
+  - id: cli-custom-egress-oauth-provider-flags
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.28.0"
+    complexity: low
+    tags: [bug, cli, python, egress-auth, oauth, api-parity, fixed-in-1.29.0]
+    problem_statement: |
+      `egress-configure --provider custom` in api/registry_management.py can never
+      succeed. The CLI accepts the `custom` provider but forwards none of the
+      `custom_*` fields the server needs, so `resolve_provider` always rejects the
+      request with "custom requires custom_authorize_url and custom_token_url".
+      The only workaround is to POST to /api/servers/{path}/egress-auth with curl.
+
+      This is a CLI/UI parity gap, not a deliberate restriction: the API request
+      model accepts five custom fields (custom_authorize_url, custom_token_url,
+      custom_scope_separator, custom_token_auth_style, custom_resource), the
+      persistence schema stores them, the React server-edit modal already sends
+      them, and `list_providers()` advertises `custom` as selectable.
+
+      Add the missing flags to the CLI and forward the fields through the registry
+      client. Follow the client's existing "only send what was supplied"
+      convention so an omitted flag does not null out a stored value on an edit,
+      and constrain the token auth style flag to the values the server's enum
+      accepts. Add unit tests that fail against the current tree.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1601
+    clarifying_answers: |
+      1. The egress-configure CLI command advertises `--provider custom` but has
+         no flags for the custom authorize/token URLs the server requires, so the
+         request is always incomplete and rejected.
+      2. Operators configuring per-user egress OAuth for providers whose OAuth
+         endpoints are per-tenant (for example a Salesforce org host) and cannot
+         be a static provider-registry row.
+      3. Python CLI (argparse) plus a registry HTTP client, against the existing
+         FastAPI egress-auth routes. Must not change the endpoint or method. No
+         deadline.
+      4. Low - add five pass-through flags and wire them into the client call.
+    ground_truth:
+      approach: >-
+        Add the five custom_* fields to RegistryClient.configure_egress_auth and
+        matching --custom-* flags to the egress-configure command, sending each
+        only when supplied (the existing `if x is not None` convention), with
+        --custom-token-auth-style constrained to post_body|basic_header.
+      expectations:
+        - Forwards all five custom fields, not only the two the server requires.
+        - Preserves partial-update semantics so omitted flags do not overwrite stored values.
+        - Constrains the token auth style to the server-side enum values.
+        - Leaves the endpoint, HTTP method, and UI behaviour unchanged, and adds tests.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1602
+
+  # ---------------------------------------------------------------------------
+  # MEDIUM COMPLEXITY (5)
+  # ---------------------------------------------------------------------------
+
+  - id: derive-repo-url-from-skill-md
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "v1.0.19"
+    complexity: medium
+    tags: [enhancement, skills, ui, react, api, ux, fixed-in-1.0.20]
+    problem_statement: |
+      Two related gaps in skill registration and the skill detail modal.
+
+      First, the registration form makes the user type the Repository URL by hand
+      even though it is derivable from the SKILL.md URL they already pasted.
+      Derive it when the user clicks Parse, for both supported URL shapes -
+      `https://github.com/org/repo/blob/<branch>/<path>/SKILL.md` and
+      `https://raw.githubusercontent.com/org/repo/refs/heads/<branch>/<path>/SKILL.md`
+      - yielding `https://github.com/org/repo`. It must also work for
+      GitHub Enterprise hosts (for example github.mycompany.com). The user must
+      still be able to edit the field afterwards, and a non-GitHub URL must leave
+      the field empty rather than guessing. The backend parse response needs to
+      return the derived repository_url.
+
+      Second, the skill detail (i) modal shows a single "View on GitHub" link
+      pointing at the SKILL.md file, and never surfaces a stored repository_url.
+      Replace it with two links: "View Skill" pointing at the SKILL.md URL, and
+      "View Repo" pointing at the repository root, shown only when a repository
+      URL exists. Apply the same change to the skill modal in the semantic-search
+      results, and add repository_url to the frontend Skill type.
+
+      Out of scope: verifying the repository exists, and deriving repo URLs for
+      non-GitHub hosts such as GitLab or Bitbucket.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/846
+    clarifying_answers: |
+      1. Users retype a Repository URL that is derivable from the SKILL.md URL,
+         and the skill detail modal offers no way to reach the repository root.
+      2. Anyone registering or browsing skills in the registry UI.
+      3. React/TypeScript frontend with a FastAPI parse endpoint. GitHub and
+         GitHub Enterprise only. No deadline.
+      4. Medium - a backend URL-derivation helper returned from the parse
+         response, plus form auto-fill and modal link changes in two components.
+    ground_truth:
+      approach: >-
+        Add a repository-URL derivation helper that handles the github.com blob
+        form, the raw.githubusercontent.com form, and enterprise hosts, return it
+        from the SKILL.md parse endpoint, auto-fill the (still editable)
+        Repository URL field on Parse, and split the modal's single GitHub link
+        into View Skill / View Repo with the repo link conditional.
+      expectations:
+        - Handles both URL shapes plus enterprise GitHub hosts, and returns empty for non-GitHub URLs.
+        - Returns repository_url from the backend parse response rather than deriving only in the UI.
+        - Keeps the auto-filled field user-editable.
+        - Updates both the skill detail modal and the semantic-search results modal, and the Skill TS interface.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/857
+
+  - id: consistent-csrf-across-toggle-endpoints
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "v1.0.20"
+    complexity: medium
+    tags: [security, csrf, authentication, api, fastapi, m2m, fixed-in-1.0.21]
+    problem_statement: |
+      CSRF protection across the /toggle endpoints is inconsistent, and where it
+      is applied it blocks legitimate programmatic clients.
+
+      A client authenticated with an OAuth M2M bearer token can register agents,
+      skills, servers, and virtual servers, but cannot ENABLE the agent or skill
+      it just registered: those toggles return
+      `403 CSRF validation failed: no token provided`. Agents are registered
+      disabled by default, so every registration pipeline is broken at the last
+      step. The CSRF dependency requires both a CSRF token AND a session cookie
+      to validate it against, and a bearer-token client has no session cookie -
+      so the requirement is structurally unsatisfiable, not a matter of sending
+      the right header.
+
+      Audit the toggle endpoints across the server, agent, skill, and
+      virtual-server routes: they all authenticate the same way, yet only some
+      carry the CSRF dependency. Make the coverage consistent AND compatible with
+      bearer-token auth, without weakening the browser threat model - a
+      cookie-bearing browser/SPA request must still be CSRF-protected on every
+      toggle endpoint. Explain your choice among the possible designs, and cover
+      it with tests for the browser and bearer-token paths.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/891
+    clarifying_answers: |
+      1. CSRF is applied to only some of the toggle endpoints, and on the agent
+         and skill toggles it makes bearer-token M2M clients unable to enable the
+         assets they just registered.
+      2. Teams running programmatic registration pipelines against the registry,
+         plus browser users of the SPA.
+      3. Python/FastAPI with an nginx-proxied auth dependency. Must not weaken
+         CSRF protection for browser sessions. No deadline.
+      4. Medium - one shared CSRF dependency plus consistent application across
+         all six toggle endpoints.
+    ground_truth:
+      approach: >-
+        Make the flexible CSRF dependency conditional on the presence of a session
+        cookie - a request with no session cookie cannot be a CSRF attack, so the
+        check short-circuits - and then apply the dependency uniformly to every
+        toggle endpoint, so browser calls stay protected and bearer-token clients
+        succeed.
+      expectations:
+        - Audits all toggle endpoints and reports which do and do not carry CSRF today.
+        - Explains why a bearer-token client can never satisfy the current check.
+        - Chooses a design that keeps cookie-based requests protected rather than removing CSRF.
+        - Applies the fix consistently across server, agent, skill, and virtual-server toggles, with tests for both paths.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/894
+
+  - id: configurable-ui-title
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.23.0"
+    complexity: medium
+    tags: [enhancement, ui, react, config, branding, docker, terraform, helm, fixed-in-1.24.0]
+    problem_statement: |
+      The top-left UI title is the hardcoded string "AI Gateway & Registry",
+      baked into several frontend files. That is wrong for registry-only
+      deployments (DEPLOYMENT_MODE=registry-only has no gateway, so the title
+      should read "AI Registry"), and enterprises that want their own product
+      name have to fork the frontend.
+
+      Add an optional `UI_TITLE` configuration parameter. When it is set, the UI
+      shows that exact string. When it is unset, the title is derived from the
+      existing DEPLOYMENT_MODE: "AI Gateway & Registry" for with-gateway and
+      "AI Registry" for registry-only. Serve it from the existing /api/config
+      endpoint so the frontend reads it at runtime and no rebuild is needed, and
+      surface it in the System Config admin panel.
+
+      The parameter must be plumbed through all three deployment surfaces:
+      Docker/Docker Compose (.env.example and every compose file), Terraform/ECS
+      (root and module variables plus the task definition and tfvars example),
+      and Helm (the registry chart values, its deployment template, and the stack
+      chart values). Deployments that do not set UI_TITLE must see no change.
+
+      Out of scope: i18n of the title, per-user customization, favicon/logo
+      changes, and the pre-first-render browser tab title in the static
+      index.html.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/984
+    clarifying_answers: |
+      1. The UI title is hardcoded, so registry-only deployments show a
+         misleading "Gateway" label and operators cannot brand the deployment
+         without forking the frontend.
+      2. Operators deploying the registry (especially registry-only mode) and
+         enterprises rebranding it internally.
+      3. FastAPI settings plus a React frontend, deployed via Docker Compose,
+         Terraform/ECS, and Helm. Must be backwards compatible. No deadline.
+      4. Medium - one new optional settings field with a deployment-mode-aware
+         default, surfaced through /api/config and plumbed through three
+         deployment surfaces.
+    ground_truth:
+      approach: >-
+        Add an optional `ui_title: str | None` settings field defaulting to None,
+        compute the effective title from DEPLOYMENT_MODE when it is unset, return
+        it from /api/config, read it in the frontend through the existing
+        useRegistryConfig() hook, and wire the variable through Compose,
+        Terraform/ECS, and Helm.
+      expectations:
+        - Uses the existing settings/config endpoint and frontend hook instead of adding new plumbing.
+        - Gets the deployment-mode-aware default right for both modes, with the explicit value always winning.
+        - Updates every frontend surface that hardcodes the string (layout, login, logout).
+        - Plumbs the parameter through all three deployment surfaces and documents it in .env.example.
+        - Keeps existing deployments visually unchanged when UI_TITLE is unset.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1043
+
+  - id: configurable-mcp-proxy-upstream-timeout
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.25.0"
+    complexity: medium
+    tags: [enhancement, config, auth-server, httpx, proxy, timeouts, fixed-in-1.26.0]
+    problem_statement: |
+      The auth-server's /mcp-proxy hop opens its upstream connection with a
+      hardcoded 30 second timeout (`httpx.AsyncClient(timeout=30.0)` in
+      auth_server/server.py). Any upstream MCP tool call that legitimately runs
+      longer than 30s is killed and the hop returns
+      `504 Upstream MCP server timed out`, even though the upstream is healthy and
+      still working. Real deployments hit this with fan-out coordinator agents:
+      lightweight calls such as initialize and tools/list succeed, while heavier
+      delegations fail at exactly 30s. There is no way to raise the value without
+      rebuilding the image.
+
+      Make the proxy-hop upstream timeout configurable, following the same pattern
+      the codebase already uses for the proxy body-size limit: a settings field
+      with an MCP_PROXY_* environment-variable fallback, exposed in the admin
+      config surface. Enforce a sensible minimum, keep the default at 30 seconds
+      so nothing changes for operators who do not opt in, and wire the parameter
+      through the deployment surfaces and docs the way other MCP_PROXY_* knobs
+      are. Add unit tests for the default, an override, and the validation floor.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1320
+    clarifying_answers: |
+      1. The MCP proxy hop's upstream timeout is hardcoded to 30s, so
+         long-running tool calls fail with 504 and operators cannot raise it
+         without rebuilding the image.
+      2. Operators fronting long-running MCP servers or fan-out coordinator
+         agents through the gateway.
+      3. Python/FastAPI auth-server using httpx. Default must stay 30s so
+         behaviour is unchanged unless the operator opts in. No deadline.
+      4. Medium - mirror the existing mcp_proxy_max_body_bytes pattern: settings
+         field, env fallback, admin-config entry, docs, tests.
+    ground_truth:
+      approach: >-
+        Add an `mcp_proxy_upstream_timeout_seconds` settings field (float,
+        minimum 1, default 30) with an MCP_PROXY_UPSTREAM_TIMEOUT_SECONDS env
+        fallback read the same way as mcp_proxy_max_body_bytes, use it when
+        constructing the httpx client in the proxy hop, and expose it in the admin
+        config surface and docs.
+      expectations:
+        - Follows the existing mcp_proxy_max_body_bytes pattern rather than inventing new config plumbing.
+        - Keeps the 30s default so existing deployments are unaffected.
+        - Validates a minimum so the timeout cannot be set to zero or negative.
+        - Surfaces the knob in the admin config page and the deployment surfaces/docs, with tests.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1356
+
+  - id: nginx-location-trailing-slash-route-hijack
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: medium
+    tags: [bug, security, nginx, routing, auth, python, fixed-in-1.28.0]
+    problem_statement: |
+      Generated nginx location blocks for registered MCP servers hijack unrelated
+      routes. `nginx_service.py::_create_location_block` emits
+      `location {ROOT_PATH}<path>` with no trailing slash, and in nginx a prefix
+      location matches every URL that STARTS WITH that string. A server registered
+      at a short path such as `/a` therefore matches `/api/...`, `/auth`, `/about`
+      and any SPA route beginning with `a`, and because the generated blocks carry
+      `auth_request /validate`, unauthenticated navigation to those routes returns
+      `{"error": "Authentication required"}` instead of the expected page.
+
+      The bug is easy to miss: while a valid session cookie is present the
+      auth_request returns 200 and the request passes through, so it only surfaces
+      for unauthenticated requests such as post-logout redirects or direct links.
+      The `^~` guards on a handful of paths protect only those specific longer
+      matches.
+
+      Fix the generated location blocks so a server registered at `/name` owns only
+      routes under `/name/` and cannot intercept sibling routes. Existing MCP
+      clients call `/name/mcp` and `/name/sse` and must keep working; a bare
+      `GET /name` should behave sensibly. Consider what happens to already-written
+      nginx config on an existing deployment, and add tests covering the
+      generated block and the prefix-collision case.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1501
+    clarifying_answers: |
+      1. Generated MCP server nginx location blocks have no trailing slash, so a
+         server registered at a short path prefix-matches and hijacks unrelated
+         browser and API routes, returning "Authentication required".
+      2. Any deployment with a server registered at a path that is a prefix of
+         another route; it manifests as post-logout 401s on SPA routes.
+      3. Python nginx-config generation plus nginx prefix-matching semantics.
+         Existing MCP clients must keep working. No deadline.
+      4. Medium - normalize the generated location path and verify the
+         redirect/regeneration behaviour.
+    ground_truth:
+      approach: >-
+        Normalize the location path in `_create_location_block` to always end in a
+        trailing slash (`path.rstrip("/") + "/"`), so nginx only matches requests
+        under that subtree; `/name/mcp` and `/name/sse` still match and a bare
+        `GET /name` gets nginx's standard 301 to `/name/`.
+      expectations:
+        - Explains nginx prefix-match semantics and why the missing slash causes the hijack.
+        - Fixes the generator rather than special-casing individual colliding routes.
+        - Confirms existing MCP client paths (/name/mcp, /name/sse) still match, and covers the bare-path redirect.
+        - Considers regeneration of already-written config for existing deployments, and adds tests.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1620
+
+  # ---------------------------------------------------------------------------
+  # HIGH COMPLEXITY (5)
+  # ---------------------------------------------------------------------------
+
+  - id: registration-admission-control-gate
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "v1.0.19"
+    complexity: high
+    tags: [security, architecture, api, fastapi, webhooks, admission-control, fixed-in-1.0.20]
+    problem_statement: |
+      Any authenticated user with the right permissions can register an agent,
+      server, or skill with no external policy enforcement. Organizations need to
+      apply their own rules - naming conventions, compliance checks, approval
+      workflows - before a registration is persisted.
+
+      Add a registration gate: an admission-control webhook that the registry
+      calls before persisting ANY asset registration or update. The registry POSTs
+      the registration payload to a configurable external HTTP endpoint; the gate
+      returns allow (200) or deny (403), and on deny the gate's error message is
+      surfaced to the caller. If the gate is unreachable or times out, the
+      registration is BLOCKED (fail-closed).
+
+      The gate must apply to every registration and update path across all three
+      asset types - agent register and update, server register (including the
+      internal registration route), and skill create and update - and the payload
+      must identify which endpoint the call came from so the gate can distinguish
+      them. Design the configuration (enable flag, endpoint URL, timeout, and
+      authentication to the gate), the request and response contract, the error
+      surfaced to the caller on deny versus on gate failure, and what is logged.
+      The feature must be off by default so existing deployments are unaffected,
+      and it must be wired through the deployment surfaces. Include tests for
+      allow, deny, timeout, and unreachable-gate.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/809
+    clarifying_answers: |
+      1. There is no way for an organization to enforce custom policy before an
+         agent, server, or skill registration is persisted.
+      2. Enterprise operators of the registry who need admission control and
+         approval workflows in front of registration.
+      3. Python/FastAPI. The gate is an external HTTP service. Must be off by
+         default and fail-closed when enabled. No deadline.
+      4. High - a new outbound gate call inserted into every registration and
+         update path for all three asset types, with configuration, error
+         handling, and tests.
+    ground_truth:
+      approach: >-
+        Add a configurable admission-control webhook invoked from a single shared
+        gate helper that every registration and update path calls before
+        persisting: POST the payload (including a source_api discriminator) to the
+        configured endpoint, allow on 200, deny on 403 with the gate's message
+        propagated to the caller, and fail closed on timeout or transport error.
+      expectations:
+        - Covers all six registration/update endpoints across agents, servers, and skills, including the internal route.
+        - Places the gate before persistence and after existing authn/validation.
+        - Fails closed on timeout or unreachable gate, and distinguishes that from an explicit deny in the caller-facing error.
+        - Defines the request/response contract and a source discriminator so the gate can tell endpoints apart.
+        - Ships disabled by default, configurable (URL, timeout, auth), wired through the deployment surfaces, and tested for allow/deny/timeout/unreachable.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/881
+
+  - id: server-side-oauth-token-storage
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.23.0"
+    complexity: high
+    tags: [authentication, oauth, session, mongodb, encryption, auth-server, fixed-in-1.24.0]
+    problem_statement: |
+      OAuth session cookies exceed the browser's 4096-byte limit. A session that
+      carries user metadata (~500 bytes) plus a JWT access token (2-3 KB) plus a
+      refresh token (2-3 KB) plus serialization overhead lands around 7 KB, which
+      breaks authentication for identity providers that issue large JWTs -
+      Microsoft Entra ID with group claims, Keycloak with custom attributes. The
+      current workaround is that OAuth tokens are simply commented out of the
+      session cookie, which means the "Get JWT Token" feature does not work at all
+      for OAuth users.
+
+      Move the tokens out of the cookie using a token-reference pattern: store the
+      OAuth access and refresh tokens server-side in MongoDB, encrypted at rest,
+      and keep only user metadata plus a short opaque token reference in the
+      session cookie. Add an endpoint that returns the current user's tokens
+      on demand so the "Get JWT Token" feature works again, and expire stored
+      tokens automatically with a TTL index.
+
+      Design the token store (schema, indexes, key management for the encryption,
+      lookup by reference scoped to the authenticated user), the OAuth callback
+      changes, the on-demand retrieval endpoint and its authorization, and the
+      cleanup/expiry story. Normal request validation must stay cookie-only with
+      no extra database read, and the change must remain backwards compatible with
+      the existing authentication flow. Cover it with tests including the
+      expired-and-revoked cases.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/399
+    clarifying_answers: |
+      1. OAuth session cookies exceed the 4096-byte browser limit when they carry
+         IdP access and refresh tokens, so tokens were removed from the cookie and
+         the "Get JWT Token" feature is unavailable for OAuth users.
+      2. Operators and end users on identity providers that issue large JWTs
+         (Entra ID with group claims, Keycloak with custom attributes).
+      3. Python auth-server with MongoDB/DocumentDB already available. Must be
+         backwards compatible with the existing auth flow. No deadline.
+      4. High - a new encrypted server-side token store, OAuth callback changes, a
+         new retrieval endpoint, and TTL-based cleanup.
+    ground_truth:
+      approach: >-
+        Introduce a TokenStore that persists encrypted OAuth tokens in a MongoDB
+        collection keyed by a secure random token_ref with a TTL index, store only
+        user metadata plus the token_ref in the session cookie, and add
+        GET /api/tokens/current to fetch the tokens on demand for the authenticated
+        user.
+      expectations:
+        - Keeps the cookie small (metadata plus an opaque reference) and well under the 4096-byte limit.
+        - Encrypts tokens at rest and addresses where the encryption key comes from; never logs token material.
+        - Scopes retrieval to the authenticated user so a token_ref alone is not sufficient to read tokens.
+        - Uses a TTL index (or equivalent) for automatic expiry/cleanup, and handles the missing/expired reference path.
+        - Leaves the normal per-request cookie-only validation path free of extra database reads, and stays backwards compatible.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1042
+
+  - id: lifecycle-workflow-webhooks
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.7"
+    complexity: high
+    tags: [architecture, security, api, webhooks, hmac, lifecycle, permissions, fixed-in-1.25.0]
+    problem_statement: |
+      The registry needs to act as the system of record for a server registration
+      lifecycle (draft -> beta -> active -> deprecated) that is orchestrated
+      OUTSIDE the registry. Two gaps block that today.
+
+      First, the asynchronous YARA security scan that runs after registration
+      emits no event, so an external CI/CD consumer has to poll
+      GET /api/servers/{path}/security-scan to learn the outcome.
+
+      Second, there is no way to mandate the initial status of a registration, and
+      no permission separating "may register an asset" from "may change an asset's
+      lifecycle status" - the PATCH endpoint gates a status change under the same
+      permission as any other metadata edit, so a scope cannot express
+      "register yes, promote no".
+
+      Deliver: (1) a `scan_complete` async webhook event carrying the scan
+      outcome, including the failure path; (2) an HMAC-SHA256 signature header
+      over the exact transmitted body on ALL outbound async webhook events, keyed
+      by a configurable signing secret - a forged "scan passed" event could
+      otherwise trick an orchestrator into promoting an unsafe asset; (3) a
+      `status=` filter on the list endpoints so an admin can pull a review queue;
+      (4) a config flag that mandates the initial registration status, defaulting
+      to off, that forces an unspecified status and rejects a mismatched explicit
+      one with a clear 4xx; and (5) a distinct lifecycle-status-change permission
+      that the PATCH endpoint additionally requires when the patch touches status,
+      leaving ordinary metadata edits where they are. Apply all of it to servers,
+      agents, and skills. Add a webhook send metric and consumer-contract docs
+      covering ordering, idempotency, and signature verification.
+
+      Explicitly NOT in scope: a webhook event on lifecycle transitions - the
+      orchestrator initiates those and already knows the outcome.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1330
+    clarifying_answers: |
+      1. An external orchestrator needs to drive a draft -> beta -> active ->
+         deprecated lifecycle, but the registry emits no event when the async
+         security scan finishes, cannot mandate an initial status, and cannot
+         separate "register" from "promote" as permissions.
+      2. Enterprise customers running a registration approval workflow with a
+         CI/CD pipeline and an admin review queue in front of the registry.
+      3. Python/FastAPI with DocumentDB, an existing registration gate, an
+         existing async YARA scanner, and existing outbound async webhooks. No
+         deadline.
+      4. High - one new webhook event, HMAC signing across all outbound events,
+         a list filter, a config flag, and a new permission, with parity across
+         servers, agents, and skills.
+    ground_truth:
+      approach: >-
+        Add a `scan_complete` async webhook fired when the YARA scan finishes,
+        sign every outbound async webhook body with HMAC-SHA256 in an
+        X-Registry-Signature header keyed by a configured secret, add a `status=`
+        list filter, add a REGISTRATION_ENFORCED_STATUS config that defaults to
+        None, and add a `change_lifecycle_status` permission that the PATCH path
+        requires only when the patch touches `status`.
+      expectations:
+        - Emits scan_complete with the scan outcome on both the success and failure paths, with the error sanitized.
+        - Signs the exact transmitted body for every outbound async event type, and documents constant-time verification.
+        - Defaults the enforced-status config to off so existing deployments are unaffected, and returns a clear 4xx on a mismatched explicit status.
+        - Adds the status-change permission as an ADDITIONAL check on PATCH only when status changes, leaving ordinary edits under the existing permission.
+        - Achieves parity across servers, agents, and skills, and does not add a transition webhook.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1331
+
+  - id: per-caller-per-target-rate-limits-and-quarantine
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: high
+    tags: [rate-limiting, security, auth-server, api, operations, fixed-in-1.28.0]
+    problem_statement: |
+      The application-level rate limiter enforces limits on two axes at the
+      /validate chokepoint: a caller axis (a per-caller quota that spans all
+      targets) and a target axis (one shared counter for a target across all
+      callers). Two capabilities operators keep asking for cannot be expressed.
+
+      First, "each caller may call each target only N times per window". Neither
+      existing axis expresses an independent quota per (caller, target) pair, so
+      on a shared multi-tenant backend one noisy caller consumes another caller's
+      headroom against the same server, and a caller's traffic to server X counts
+      against its traffic to server Y.
+
+      Second, an absolute kill switch. When a caller is compromised or a target
+      must be pulled from rotation, the only lever today is setting a group limit
+      very low - which still lets traffic through and is subject to the
+      configuration-time floor safeguard. Operators need to drop all matching
+      traffic immediately.
+
+      Add a third `caller_target` axis whose counter subject is the composite of
+      the caller identity and the classified target entity, reusing the existing
+      membership storage and only applying where a request classifies to a target.
+      And add quarantine: reserved caller and target quarantine groups, auto-seeded
+      empty at startup so an operator never has to create them, undeletable,
+      evaluated as an early deny before any counter work. Decide and justify the
+      response semantics for a quarantine deny versus a throttle, the admin-bypass
+      behaviour for a quarantined caller versus a quarantined target, and the
+      failure mode when the backing store is unavailable. Both features must land
+      at the existing single enforcement hook with no new deployment
+      configuration, no nginx template changes, and no new infrastructure, and
+      must be manageable through the existing admin API, CLI, and UI.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1504
+    clarifying_answers: |
+      1. The rate limiter's caller and target axes cannot express a per-caller-
+         per-target quota, and there is no absolute kill switch for a compromised
+         caller or a target that must be taken out of rotation.
+      2. Operators of shared multi-tenant deployments who need fair-share limits
+         and an immediate block.
+      3. Python auth-server, enforcement at the existing RateLimiter.check() hook,
+         memberships already stored in the rate-limit collections. No new
+         infrastructure, no nginx template changes. No deadline.
+      4. High - a third rate-limit axis plus a first-class quarantine mechanism,
+         both wired through the existing admin API, CLI, and UI.
+    ground_truth:
+      approach: >-
+        Add a `caller_target` axis as a group definition whose counter key encodes
+        both the caller identity and the classified target, built only for
+        data-plane requests; and add reserved `quarantine-callers` /
+        `quarantine-targets` groups, idempotently seeded at startup, enforced as an
+        early deny in RateLimiter.check() before any counter increment.
+      expectations:
+        - Gives each (caller, target) pair an independent counter, verified in both directions (different targets, different callers).
+        - Skips the new axis for control-plane requests that classify to no target, and keeps the existing floor safeguard and admin bypass semantics.
+        - Returns a plain 403 for quarantine rather than a 429, and justifies that quarantine is an access decision, not a throttle.
+        - Consumes no counter on a quarantine deny, and states the admin-bypass decision for a quarantined caller versus a quarantined target.
+        - Reuses the existing memberships collection and enforcement hook - no new schema field, deployment config, or nginx changes - and documents the failure mode.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1541
+
+  - id: idp-authenticated-embedding-endpoint
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.28.0"
+    complexity: high
+    tags: [semantic-search, embeddings, oauth, authentication, litellm, docker, terraform, helm, fixed-in-1.29.0]
+    problem_statement: |
+      The registry can already reach a cloud embedding endpoint through its
+      LiteLLM embeddings provider, but that path assumes a STATIC credential: a
+      fixed key supplied once via EMBEDDINGS_API_KEY and pushed into a provider
+      environment variable when the client is constructed.
+
+      Some enterprise embedding endpoints are OpenAI-compatible on the wire but
+      are gated by a short-lived access token (typically a ~60 minute JWT) that
+      the caller must obtain from an identity provider using the OAuth2
+      client-credentials grant and refresh before it expires. Today a token pasted
+      into EMBEDDINGS_API_KEY works for one token lifetime, after which every
+      embedding call and every semantic-search query returns 401.
+
+      Support these endpoints by keeping the existing LiteLLM request/response
+      path - the wire format is already correct - and adding an opt-in IdP token
+      provider: a thread-safe token manager that performs the client-credentials
+      flow against a configurable token endpoint, caches the token with an expiry
+      buffer, refreshes it automatically before expiry, and supplies a fresh
+      bearer on each embedding call instead of relying on a static environment
+      variable. Mirror the token-manager pattern the codebase already uses for
+      federation auth.
+
+      Every new setting must default to unset, and with them unset the behaviour
+      of all existing providers must be byte-for-byte identical to today. The
+      client secret must never be logged and must be masked in the config UI.
+      Fail fast at startup with a clear error if IdP mode is selected but the
+      required settings are missing, wire the new parameters through the Docker,
+      Terraform/ECS, and Helm surfaces plus the parameter reference doc, and
+      document the embedding-dimension / re-index caveat.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1415
+    clarifying_answers: |
+      1. The LiteLLM embeddings path only supports a static API key, so
+         enterprise OpenAI-compatible endpoints gated by a short-lived
+         IdP-issued bearer token start returning 401 after one token lifetime.
+      2. Operators whose organization fronts its embedding endpoint with an IdP
+         using the OAuth2 client-credentials grant.
+      3. Python registry using LiteLLM for embeddings, with an existing
+         federation auth manager to mirror. Must be fully backwards compatible
+         and opt-in. No deadline.
+      4. High - a new thread-safe token provider plus per-call bearer injection,
+         config validation, secret masking, and wiring through three deployment
+         surfaces.
+    ground_truth:
+      approach: >-
+        Keep litellm.embedding for the payload, add an opt-in OAuth2
+        client-credentials token provider (cached with an expiry buffer,
+        thread-safe, auto-refreshing) modeled on the existing FederationAuthManager,
+        and have LiteLLMClient.encode() pass a freshly-fetched token as the
+        per-request api_key when EMBEDDINGS_AUTH_MODE=idp.
+      expectations:
+        - Reuses the existing LiteLLM request/response path rather than hand-rolling the embedding call.
+        - Caches and refreshes the token ahead of expiry, and is safe under concurrent encode() calls.
+        - Passes the token per request and does NOT set the provider API-key environment variable when IdP auth is active.
+        - Keeps every new setting unset by default so sentence-transformers, static-key LiteLLM, and Bedrock IAM paths are unchanged.
+        - Never logs the client secret, masks it in the config UI, validates required settings at startup, and wires the parameters through Docker, Terraform/ECS, Helm, and the parameter reference.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1611
+
+  # ---------------------------------------------------------------------------
+  # TRIVIAL (5)
+  #
+  # Added after the first three-model run. Every one is a real closed issue whose
+  # shipped fix is small and self-contained (the largest is one file); tasks whose
+  # merged PR bundled unrelated work were rejected during selection, because
+  # ground_truth then describes more than the issue asks.
+  # ---------------------------------------------------------------------------
+
+  - id: index-demo-videos-in-one-page
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.24.3"
+    complexity: trivial
+    tags: [docs, markdown, readme, discoverability, fixed-in-1.24.4]
+    problem_statement: |
+      Demo videos for this project are scattered across the README and a dozen
+      individual files under docs/ -- GitHub user-attachment mp4 recordings, a
+      YouTube link, and several Vidcast shares. A visitor who wants to watch a
+      demo has nowhere single to look, and the same video is sometimes linked
+      from two places while others are linked from only one deep page.
+
+      Create a single docs/demo-videos.md that indexes every demo video in the
+      repository in one place, grouped so a reader can find the one they want,
+      and add a prominent link to it from the README. Find the existing video
+      links yourself by scanning the markdown files rather than assuming a list;
+      the point of the page is that it is complete. This is a documentation-only
+      change -- no code, build system, or tests are involved.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1190
+    clarifying_answers: |
+      1. Demo videos are spread across the README and many docs/ pages with no
+         single index, so most of them are effectively undiscoverable.
+      2. New visitors evaluating the project, and existing users looking for a
+         specific walkthrough.
+      3. Markdown only. No deadline.
+      4. Trivial - one new documentation page plus a README link.
+    ground_truth:
+      approach: >-
+        Add a single docs/demo-videos.md listing every demo video found in the
+        repository, grouped by topic, and replace the README's scattered
+        references with one prominent link to that page.
+      expectations:
+        - Scans the markdown tree for existing video links rather than inventing a list.
+        - Creates docs/demo-videos.md as the single index.
+        - Adds a link from README.md pointing at the new page.
+        - Changes no code, and does not break the existing deep links.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1196
+
+  - id: hide-register-button-on-virtual-and-skills-tabs
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "v1.0.18"
+    complexity: trivial
+    tags: [ui, react, dashboard, ux, fixed-in-v1.0.19]
+    problem_statement: |
+      In the dashboard, the header "Register" button stays visible when the user
+      is on the Virtual MCP Servers tab or the Agent Skills tab. Both of those
+      tabs already have their own action button ("Add Virtual Server" and "Add
+      Skill"), so the user sees two competing "add" buttons, and the Register one
+      leads to the server/agent registration form that does not apply to the tab
+      they are looking at.
+
+      Make the Register button appear only on the tabs it is relevant to. Find
+      the render condition that currently controls it and narrow it, keeping the
+      button on the tabs where registration IS the right action. Do not remove
+      the button or the registration flow.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/793
+    clarifying_answers: |
+      1. The Register button shows on tabs where it does not apply, competing
+         with each tab's own add button and leading to the wrong form.
+      2. Anyone using the registry dashboard.
+      3. React/TypeScript frontend. No deadline.
+      4. Trivial - narrowing one render condition.
+    ground_truth:
+      approach: >-
+        Narrow the Register button's render condition in the dashboard so it is
+        hidden on the skills and virtual tabs as well as discover, leaving it on
+        MCP Servers, Agents and External Registries.
+      expectations:
+        - Locates the render condition gating the Register button.
+        - Excludes the skills and virtual tabs without removing the button entirely.
+        - Leaves the tabs where registration applies unchanged.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/794
+
+  - id: pass-ssrf-allowlist-env-to-registry-container
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: trivial
+    tags: [docker, compose, configuration, ssrf, fixed-in-1.28.0]
+    problem_statement: |
+      SSRF_ALLOWED_HOSTS and SSRF_ALLOWED_CIDRS are documented in .env and read
+      by the registry at runtime, but the compose files do not pass either
+      variable into the registry service's environment. On a compose deployment
+      the settings therefore have no effect: the process never sees them.
+
+      The practical consequence is that an internal upstream cannot be
+      allowlisted. Register a server reachable only by a docker-network hostname
+      and its health check reports "url blocked by SSRF guard"; setting
+      SSRF_ALLOWED_HOSTS in .env changes nothing. The only workaround is to hand-
+      edit the compose file.
+
+      Wire the two variables through to the registry service so that setting them
+      in .env takes effect. Check every compose file that starts the registry,
+      not just the default one.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1513
+    clarifying_answers: |
+      1. Two documented SSRF allowlist variables never reach the registry
+         container on compose deployments, so internal upstreams cannot be
+         allowlisted at all.
+      2. Operators running the gateway via docker compose with internal MCP
+         servers behind it.
+      3. Docker Compose YAML. No deadline.
+      4. Trivial - two environment passthroughs, applied to each compose file
+         that runs the registry.
+    ground_truth:
+      approach: >-
+        Add SSRF_ALLOWED_HOSTS and SSRF_ALLOWED_CIDRS to the registry service's
+        environment block in the compose files that start the registry, so the
+        documented .env values reach the process.
+      expectations:
+        - Finds every compose file that runs the registry, not only one.
+        - Passes both variables through, not just SSRF_ALLOWED_HOSTS.
+        - Keeps the existing default behaviour when the variables are unset.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1515
+
+  - id: macos-setup-python-version-precheck
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: trivial
+    tags: [bash, setup, skill, developer-experience, fixed-in-1.28.0]
+    problem_statement: |
+      The macos-setup skill's Phase 1 prerequisite check treats any python3 on
+      PATH as acceptable, but the project requires a newer minimum version
+      (see pyproject.toml). On a machine with an older interpreter, Phase 1
+      reports success and the run continues through several more phases before
+      failing at the dependency-sync step with an error that points at the sync
+      tool rather than at the unmet prerequisite.
+
+      Tighten the Phase 1 check so an interpreter below the project's minimum is
+      reported as a failure at Phase 1, with a message that names the actual
+      requirement. Take the required version from the project's own metadata
+      rather than hard-coding a guess, and keep the existing remediation guidance
+      reachable.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1568
+    clarifying_answers: |
+      1. The prerequisite check only tests that python3 exists, so an unsupported
+         interpreter fails four phases later with a misleading error.
+      2. Developers setting up the project on macOS.
+      3. Bash inside a skill markdown file. No deadline.
+      4. Trivial - tightening one prerequisite check and its message.
+    ground_truth:
+      approach: >-
+        Make the Phase 1 check verify the interpreter actually satisfies the
+        project's minimum Python version rather than merely existing, and fail
+        there with a message naming the requirement.
+      expectations:
+        - Checks the version, not just the presence of python3.
+        - Sources the required version from the project's own metadata.
+        - Fails at Phase 1 with a message that names the real prerequisite.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1580
+
+  - id: portable-env-secret-generation-in-build-script
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: trivial
+    tags: [bash, portability, macos, secrets, setup, fixed-in-1.28.0]
+    problem_statement: |
+      build_and_run.sh generates several required secrets into .env. On macOS and
+      other BSD userlands the generated values are silently discarded: the script
+      uses `sed -i '<expr>' .env` to strip an empty placeholder line before
+      appending the real value, but BSD sed treats the argument after -i as a
+      mandatory backup-suffix, so the command fails. The failure is hidden by
+      `2>/dev/null || true`, the empty placeholder survives, the real value is
+      appended below it, and consumers that take the first assignment read the
+      empty one.
+
+      The script logs that each secret was added while the effective value stays
+      empty, and the auth server then crash-loops on a missing secret.
+
+      Make the secret generation portable so it works on both GNU and BSD
+      userlands. Fix the pattern everywhere it appears, not just the one secret
+      whose failure is most visible, and do not let a failed edit stay silent.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1577
+    clarifying_answers: |
+      1. Non-portable `sed -i` silently no-ops on BSD/macOS, so generated .env
+         secrets stay empty and the auth server crash-loops.
+      2. Anyone running the project's build script on macOS.
+      3. Bash. Must keep working on GNU/Linux. No deadline.
+      4. Trivial - a portability fix to a repeated shell pattern.
+    ground_truth:
+      approach: >-
+        Replace the non-portable in-place sed edits in the secret-generation
+        blocks with an approach that behaves identically on GNU and BSD sed, so
+        the placeholder is removed and the generated value is the effective one.
+      expectations:
+        - Identifies BSD sed's -i backup-suffix behaviour as the cause.
+        - Fixes every affected secret block, not only the crash-visible one.
+        - Keeps the script working on GNU/Linux.
+        - Stops the edit failing silently.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1585
+
+  - id: logout-id-token-hint-out-of-browser-url
+    repo: https://github.com/agentic-community/mcp-gateway-registry
+    ref: "1.27.1"
+    complexity: low
+    tags: [auth, oidc, logout, security, waf, fixed-in-1.28.0]
+    problem_statement: |
+      During OAuth2 logout the registry redirects the browser to the auth server
+      with the full OIDC ID token in the query string as id_token_hint. That JWT
+      is typically 1000-3000+ characters, and routing it through a browser
+      redirect has two consequences.
+
+      First, any WAF or reverse proxy in front of the deployment inspects it:
+      query-string size limits and injection rules commonly reject the request
+      with a 403 before it reaches the auth server, so logout fails -- and it
+      fails silently, because the local session has already been cleared by that
+      point. Second, the token appears in browser history and in proxy, CDN and
+      access logs, which is an information disclosure for a credential that is in
+      the middle of being revoked.
+
+      Change the logout flow so the ID token is not carried in a browser-facing
+      URL, while keeping the RP-initiated logout working against the identity
+      provider (the provider still needs the hint). Keep the change backward
+      compatible for deployments that do not have the new path available.
+    problem_issue_url: https://github.com/agentic-community/mcp-gateway-registry/issues/1503
+    clarifying_answers: |
+      1. The full ID token JWT rides in a browser redirect query string, which
+         WAFs block (silently breaking logout) and which leaks the token into
+         history and logs.
+      2. Operators running the gateway behind a WAF, and any user logging out.
+      3. Python/FastAPI backend plus the auth server. No deadline.
+      4. Low - reworking how one parameter is passed between two services.
+    ground_truth:
+      approach: >-
+        Stop putting id_token_hint in the browser-facing redirect URL; pass the
+        ID token to the auth server out of band (server-side, keyed by session)
+        so the provider still receives its logout hint without the JWT
+        traversing the browser.
+      expectations:
+        - Removes the JWT from the browser-facing query string.
+        - Still supplies id_token_hint to the identity provider's logout endpoint.
+        - Handles the case where the token is unavailable rather than failing logout.
+        - Does not leave the local session cleared while logout then fails.
+      reference_url: https://github.com/agentic-community/mcp-gateway-registry/pull/1545

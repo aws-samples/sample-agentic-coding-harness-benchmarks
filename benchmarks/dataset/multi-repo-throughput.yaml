@@ -1,0 +1,391 @@
+# =============================================================================
+# SWE benchmark dataset -- multi-repo throughput mix
+# =============================================================================
+#
+# Same schema as dataset/mcp-gateway-registry.yaml (see that file's header for
+# the full field-by-field spec). The difference is the INTENT:
+#
+#   mcp-gateway-registry.yaml  -> many design tasks against ONE repo (quality).
+#   multi-repo-throughput.yaml -> one task per repo across 25 DIFFERENT public
+#                                 repos in six languages (throughput).
+#
+# The throughput harness (benchmarks/scripts/run-throughput-harness.py) holds N
+# agentic /swe2 sessions in flight and fills each freed slot by drawing a task at
+# random WITHOUT replacement (a shuffled cycle of this list). Because every task
+# points at a different repo and draws are distinct, the N concurrent slots each
+# clone and reason over a DIFFERENT codebase whenever N <= 25 -- a close
+# simulation of N developers each on their own project rather than N sessions
+# hammering one repo. The request shape (large read-heavy prompt, short design
+# output) is preserved per session, so the server-side token throughput measured
+# in DuckDB still reflects real agentic load.
+#
+# Language mix (25 repos): 10 Python, 5 Java, 3 Rust, 2 Go, 2 JS, 3 HTML/CSS.
+#
+# Every task pins its OWN `ref` (repos do not share a version line), so
+# `default_ref` below is only a documentary fallback and is never used.
+# =============================================================================
+
+schema_version: "1.0"
+name: multi-repo-throughput
+title: Multi-repo throughput mix - 25 public repos across six languages
+description: >-
+  A throughput-oriented dataset: one design task per repo across 25 well-known
+  public repositories spanning Python, Java, Rust, Go, JavaScript, and HTML/CSS.
+  The throughput harness picks a task at random for each in-flight slot, so N
+  concurrent agentic /swe sessions each work on a different codebase -- a more
+  realistic simulation of many developers doing different things than N sessions
+  on one repo. Not scored for quality; used to measure sustained server-side
+  token throughput and derive cost per token / per task under diverse load.
+created: 2026-07-25
+default_ref: "main"
+
+metrics:
+  - input_tokens          # prompt tokens sent to the model across the run
+  - output_tokens         # completion tokens generated across the run
+  - cache_read_tokens     # prompt tokens served from cache (if reported)
+  - cache_creation_tokens # prompt tokens written to cache (if reported)
+  - latency_seconds       # wall-clock time for the run
+  - num_turns             # LLM calls (turns) the agent made to complete the task
+
+complexity_levels:
+  - low
+  - medium
+  - high
+
+tasks:
+  # ---------------------------------------------------------------------------
+  # Python (10)
+  # ---------------------------------------------------------------------------
+  - id: requests-retry-backoff-defaults
+    repo: https://github.com/psf/requests
+    ref: v2.32.5
+    complexity: medium
+    tags: [python, http, resilience, retries, api-design]
+    problem_statement: |
+      Design a first-class, opt-in automatic-retry story for the top-level
+      requests API (requests.get/post/Session.request) so callers get sane
+      exponential backoff on transient failures (connection errors, 429, 5xx)
+      without dropping down to urllib3's Retry object or a custom HTTPAdapter.
+      Cover the public surface (a `retries=` parameter or Session config), the
+      default backoff/jitter policy, which status codes and exceptions are
+      retryable, honoring Retry-After, and full backwards compatibility with the
+      current no-retry default.
+
+  - id: flask-async-view-timeout
+    repo: https://github.com/pallets/flask
+    ref: "3.1.3"
+    complexity: medium
+    tags: [python, web, flask, async, timeouts]
+    problem_statement: |
+      Design a per-route request-timeout mechanism for Flask view functions
+      (both sync and async views) that returns a clean 504-style response when a
+      handler exceeds a configurable deadline, instead of letting a slow view
+      tie up a worker indefinitely. Address configuration (app-level default vs
+      per-route override via a decorator), how it interacts with the WSGI/ASGI
+      worker model, cleanup of in-flight work, and how to document that it is not
+      a substitute for a proper server-level timeout.
+
+  - id: click-shell-completion-cache
+    repo: https://github.com/pallets/click
+    ref: "8.1.8"
+    complexity: medium
+    tags: [python, cli, click, shell-completion, performance]
+    problem_statement: |
+      Design a caching layer for Click's dynamic shell completion so that
+      expensive completion callbacks (ones that hit the network or filesystem)
+      do not run on every <TAB>. Cover an opt-in cache API on ParamType /
+      completion callbacks, a TTL and invalidation story, where the cache lives
+      on disk per shell/user, and how to keep completion correct when the
+      underlying data changes.
+
+  - id: fastapi-request-id-middleware
+    repo: https://github.com/fastapi/fastapi
+    ref: "0.140.0"
+    complexity: low
+    tags: [python, web, fastapi, observability, middleware]
+    problem_statement: |
+      Design a built-in request-correlation-id feature for FastAPI: accept an
+      inbound X-Request-ID header (or generate one), make it available to route
+      handlers and dependencies via a context variable, echo it on the response,
+      and include it in logging. Cover the middleware design, how handlers and
+      background tasks access the id, and configuration (header name, whether to
+      trust an inbound id).
+
+  - id: mypy-incremental-cache-invalidation
+    repo: https://github.com/python/mypy
+    ref: v1.18.2
+    complexity: high
+    tags: [python, type-checking, mypy, caching, performance]
+    problem_statement: |
+      Design an improvement to mypy's incremental-mode cache invalidation so that
+      editing a widely-imported module does not force a near-full re-check.
+      Analyze how the current fine-grained dependency graph and cache-meta hashes
+      decide what to recheck, propose a more precise invalidation boundary (for
+      example symbol-level rather than module-level dependencies for certain edit
+      classes), and cover correctness guarantees and the fallback to a full check.
+
+  - id: black-preview-style-opt-in
+    repo: https://github.com/psf/black
+    ref: "24.10.0"
+    complexity: medium
+    tags: [python, formatting, black, configuration]
+    problem_statement: |
+      Design a cleaner mechanism for opting individual preview style features in
+      or out, rather than the current all-or-nothing --preview flag. Cover a
+      per-feature enable/disable syntax (CLI and pyproject.toml), how features
+      graduate from preview to stable, stability/versioning guarantees so a
+      formatted codebase does not churn between releases, and migration for
+      existing --preview users.
+
+  - id: pytest-flaky-test-detection
+    repo: https://github.com/pytest-dev/pytest
+    ref: "8.4.2"
+    complexity: medium
+    tags: [python, testing, pytest, flakiness, plugins]
+    problem_statement: |
+      Design a built-in (or first-party plugin) capability to detect flaky tests
+      by optionally re-running tests that pass-after-fail within a session and
+      reporting a flakiness classification, without changing the exit status
+      semantics teams rely on. Cover the opt-in CLI/ini configuration, how it
+      composes with fixtures and parametrization, the report format, and how it
+      differs from a blind rerun-until-green.
+
+  - id: tornado-graceful-shutdown
+    repo: https://github.com/tornadoweb/tornado
+    ref: v6.5.7
+    complexity: medium
+    tags: [python, web, tornado, async, lifecycle]
+    problem_statement: |
+      Design a standard graceful-shutdown API for a Tornado HTTPServer/IOLoop:
+      stop accepting new connections on SIGTERM, allow in-flight requests a
+      bounded drain period to finish, close idle keep-alive connections, and then
+      stop the loop. Cover the public API, the drain timeout, WebSocket handling,
+      and integration with process managers and load balancers.
+
+  - id: sqlalchemy-readonly-session
+    repo: https://github.com/sqlalchemy/sqlalchemy
+    ref: rel_2_0_51
+    complexity: high
+    tags: [python, orm, sqlalchemy, database, safety]
+    problem_statement: |
+      Design a first-class read-only Session mode for SQLAlchemy 2.0 that
+      guarantees no INSERT/UPDATE/DELETE/DDL is emitted -- useful for routing
+      queries to a read replica. Cover where the guard lives (flush hook, event,
+      or a dedicated session subclass), what happens when a caller mutates the
+      identity map, interaction with autoflush and lazy loads, and the API for
+      opting a session or engine into read-only.
+
+  - id: httpie-secret-redaction
+    repo: https://github.com/httpie/cli
+    ref: "3.2.4"
+    complexity: low
+    tags: [python, cli, httpie, security, logging]
+    problem_statement: |
+      Design automatic redaction of sensitive values (Authorization headers,
+      cookies, tokens in query strings, password fields) from HTTPie's terminal
+      output and its --download/session files, with an opt-out for debugging.
+      Cover which fields are redacted by default, the configuration/allowlist
+      surface, how redaction interacts with the existing color/formatting
+      pipeline, and how sessions on disk are protected.
+
+  # ---------------------------------------------------------------------------
+  # Java (5)
+  # ---------------------------------------------------------------------------
+  - id: gson-strict-null-mode
+    repo: https://github.com/google/gson
+    ref: gson-parent-2.13.2
+    complexity: medium
+    tags: [java, json, gson, serialization, api-design]
+    problem_statement: |
+      Design a strict deserialization mode for Gson that can reject unknown JSON
+      properties and/or fail when a non-nullable field is missing, rather than
+      silently leaving it null. Cover the configuration surface (GsonBuilder
+      option and/or a per-field annotation), backwards compatibility with the
+      lenient default, and how it interacts with custom TypeAdapters.
+
+  - id: guava-cache-async-refresh
+    repo: https://github.com/google/guava
+    ref: v33.4.0
+    complexity: high
+    tags: [java, caching, guava, concurrency, performance]
+    problem_statement: |
+      Design an improved asynchronous-refresh policy for Guava's LoadingCache so
+      that refreshing an expired-but-present entry never blocks a reader on the
+      slow reload path, and concurrent refreshes of the same key are coalesced.
+      Cover the API (CacheBuilder option / AsyncCacheLoader), the stale-while-
+      revalidate semantics, error handling when a refresh fails, and thread-pool
+      ownership.
+
+  - id: okhttp-per-host-connection-limit
+    repo: https://github.com/square/okhttp
+    ref: parent-4.12.0
+    complexity: medium
+    tags: [java, http, okhttp, connection-pool, resilience]
+    problem_statement: |
+      Design a configurable per-host maximum-concurrent-requests limit for OkHttp
+      (today Dispatcher caps total and per-host request counts fairly coarsely),
+      so one slow host cannot starve the shared connection pool. Cover the
+      Dispatcher API changes, queueing/backpressure when the limit is hit,
+      interaction with the existing connection pool, and metrics for observability.
+
+  - id: commons-lang-nullsafe-builder
+    repo: https://github.com/apache/commons-lang
+    ref: rel/commons-lang-3.18.0
+    complexity: low
+    tags: [java, utilities, commons-lang, api-design]
+    problem_statement: |
+      Design a null-safe, fluent addition to ToStringBuilder / EqualsBuilder that
+      lets callers exclude specific fields and mask sensitive ones (passwords,
+      tokens) from generated toString output, without breaking the existing
+      reflection-based builders. Cover the API, an annotation-driven mask option,
+      and thread-safety expectations.
+
+  - id: junit4-parallel-category-runner
+    repo: https://github.com/junit-team/junit4
+    ref: r4.13.2
+    complexity: high
+    tags: [java, testing, junit, concurrency, runners]
+    problem_statement: |
+      Design a runner/rule that executes JUnit 4 test classes in parallel by
+      Category, while guaranteeing that tests in a designated "serial" category
+      still run sequentially and never overlap with each other. Cover the
+      threading model, how @BeforeClass/@AfterClass and class-level state are
+      handled, result aggregation, and configuration of the parallelism level.
+
+  # ---------------------------------------------------------------------------
+  # Rust (3)
+  # ---------------------------------------------------------------------------
+  - id: ripgrep-search-progress-api
+    repo: https://github.com/BurntSushi/ripgrep
+    ref: "14.1.1"
+    complexity: medium
+    tags: [rust, cli, ripgrep, search, ux]
+    problem_statement: |
+      Design a progress-reporting mechanism for ripgrep on very large trees: a
+      periodic status line (files scanned, matches so far, current directory)
+      emitted to stderr when a search runs longer than a threshold, without
+      slowing the hot search path or corrupting piped stdout. Cover the flag,
+      the throttling, how it composes with --json and quiet modes, and the
+      threading interaction with the parallel walker.
+
+  - id: clap-config-file-layering
+    repo: https://github.com/clap-rs/clap
+    ref: v4.5.20
+    complexity: medium
+    tags: [rust, cli, clap, configuration, api-design]
+    problem_statement: |
+      Design a first-class config-file layering story for clap so an argument's
+      effective value resolves as CLI > environment > config file > default, with
+      clear provenance. Cover how a config source plugs into the derive and
+      builder APIs, precedence and merging of repeated/array values, how help
+      text can show the resolved source, and keeping it optional.
+
+  - id: serde-partial-deserialize
+    repo: https://github.com/serde-rs/serde
+    ref: v1.0.229
+    complexity: high
+    tags: [rust, serialization, serde, error-handling]
+    problem_statement: |
+      Design an ergonomic "deserialize what you can, collect the rest as errors"
+      mode for serde so that a single malformed field in a large struct does not
+      abort the whole deserialization. Cover the API shape (a wrapper type or
+      derive attribute), how per-field errors are accumulated and surfaced, the
+      interaction with #[serde(default)] and flatten, and zero-cost preservation
+      of the current fail-fast default.
+
+  # ---------------------------------------------------------------------------
+  # Go (2)
+  # ---------------------------------------------------------------------------
+  - id: mux-route-metrics-middleware
+    repo: https://github.com/gorilla/mux
+    ref: v1.8.1
+    complexity: low
+    tags: [go, web, gorilla-mux, observability, middleware]
+    problem_statement: |
+      Design a middleware for gorilla/mux that records per-route request metrics
+      (count, latency, status class) keyed by the matched route template rather
+      than the raw path, so high-cardinality path params do not blow up metric
+      series. Cover how it obtains the matched route name, the metrics interface
+      (pluggable, not tied to one backend), and handling of unmatched/404 routes.
+
+  - id: cobra-command-deprecation
+    repo: https://github.com/spf13/cobra
+    ref: v1.8.1
+    complexity: low
+    tags: [go, cli, cobra, deprecation, ux]
+    problem_statement: |
+      Design a structured command/flag deprecation and aliasing mechanism for
+      Cobra so maintainers can rename a command, keep the old name working with a
+      visible warning, and schedule removal by version. Cover the API on Command
+      and pflag, the warning output (once per invocation, to stderr), how
+      deprecations show in help and completion, and machine-readable metadata.
+
+  # ---------------------------------------------------------------------------
+  # JavaScript (2)
+  # ---------------------------------------------------------------------------
+  - id: axios-request-dedup
+    repo: https://github.com/axios/axios
+    ref: v1.7.9
+    complexity: medium
+    tags: [javascript, http, axios, caching, performance]
+    problem_statement: |
+      Design an opt-in in-flight request-deduplication feature for axios so that
+      identical concurrent GET requests (same method/url/params) share a single
+      network call and resolve from one response. Cover the config surface
+      (global and per-request), the key function, how it interacts with
+      interceptors, cancellation, and error propagation to all awaiting callers.
+
+  - id: lodash-deep-freeze-utility
+    repo: https://github.com/lodash/lodash
+    ref: "4.17.21"
+    complexity: low
+    tags: [javascript, utilities, lodash, immutability, api-design]
+    problem_statement: |
+      Design a deepFreeze utility for lodash that recursively freezes an object
+      graph while safely handling cycles, Maps/Sets, typed arrays, and non-plain
+      objects, and document how it differs from a shallow Object.freeze. Cover the
+      function signature, cycle detection, what is skipped (e.g. non-configurable
+      or host objects), and the performance/immutability trade-offs.
+
+  # ---------------------------------------------------------------------------
+  # HTML / CSS (2)
+  # ---------------------------------------------------------------------------
+  - id: h5bp-dark-mode-baseline
+    repo: https://github.com/h5bp/html5-boilerplate
+    ref: v9.0.1
+    complexity: low
+    tags: [html, css, html5-boilerplate, accessibility, theming]
+    problem_statement: |
+      Design a baseline dark-mode story for html5-boilerplate: a
+      prefers-color-scheme aware default in the shipped CSS plus an optional
+      user toggle that persists a choice and avoids a flash of the wrong theme on
+      load. Cover the CSS custom-property structure, the minimal no-framework JS
+      for the toggle, accessibility (contrast, respecting the OS setting), and
+      how it stays an opt-in example rather than an opinionated framework.
+
+  - id: bootstrap-container-query-utilities
+    repo: https://github.com/twbs/bootstrap
+    ref: v5.3.3
+    complexity: high
+    tags: [html, css, bootstrap, responsive, container-queries]
+    problem_statement: |
+      Design a set of container-query-based responsive utilities for Bootstrap 5
+      (alongside the existing viewport breakpoints) so components can adapt to
+      their container's width rather than the viewport. Cover the Sass API and
+      generated utility class naming, how it coexists with the current grid and
+      breakpoints, opt-in to keep CSS size in check, and browser-support/fallback
+      guidance.
+
+  - id: pico-density-scale-tokens
+    repo: https://github.com/picocss/pico
+    ref: v2.0.6
+    complexity: medium
+    tags: [html, css, pico, theming, density]
+    problem_statement: |
+      Design a configurable UI-density scale for Pico CSS (comfortable / compact
+      / spacious) driven by CSS custom properties, so consumers can tune spacing,
+      control heights, and font sizing globally without forking the Sass. Cover
+      the token structure and naming, how density interacts with the existing
+      color-scheme and responsive typography, a data-attribute or class opt-in on
+      a container subtree, and accessibility (minimum target sizes in compact
+      mode).
