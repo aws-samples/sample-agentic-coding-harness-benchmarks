@@ -1,0 +1,31 @@
+name: pre-commit
+
+# Runs the repo's pre-commit hooks (ruff lint + format, plus whitespace / EOF /
+# merge-conflict / YAML hygiene) on every PR, so style and formatting stay
+# consistent without relying on contributors having the hooks installed locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pre-commit/action@v3.0.1

@@ -20,7 +20,6 @@ The script updates an existing metrics.json with token/cache/throughput fields.
 import json
 import sys
 import os
-import glob
 from pathlib import Path
 from datetime import datetime
 

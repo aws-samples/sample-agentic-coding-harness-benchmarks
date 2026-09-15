@@ -119,7 +119,7 @@ def main():
 
     concurrency = args.concurrency
 
-    print(f"Replay benchmark")
+    print("Replay benchmark")
     print(f"  File: {args.jsonl}")
     print(f"  Endpoint: {args.endpoint}")
     print(f"  Model: {model}")

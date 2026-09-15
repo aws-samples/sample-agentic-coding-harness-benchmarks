@@ -1,0 +1,97 @@
+name: Weekly dependency update
+
+# Refreshes the uv lockfiles once a week and opens a single PR if anything
+# changed, so dependency bumps get reviewed on their own rather than riding
+# along with feature work. Uses a 7-day supply-chain quarantine (packages
+# published in the last week are excluded) to avoid pulling brand-new releases.
+# Simplified to uv-only (this repo has no npm/Makefile).
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 09:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependency-update
+  cancel-in-progress: true
+
+jobs:
+  update-lockfiles:
+    name: Update uv lockfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # push the update branch
+      pull-requests: write # open the PR
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Compute 7-day cutoff timestamp
+        id: cutoff
+        run: |
+          CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "timestamp=$CUTOFF" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u -d '7 days ago' +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "Cutoff: $CUTOFF (packages published after this are excluded)"
+
+      - name: Refresh lockfiles (7-day quarantine)
+        env:
+          UV_EXCLUDE_NEWER: ${{ steps.cutoff.outputs.timestamp }}
+        run: |
+          for proj in benchmarks self-hosted/vllm; do
+            echo "==== uv lock --upgrade in $proj ===="
+            ( cd "$proj" && uv lock --upgrade ) || echo "WARNING: uv lock failed in $proj; continuing."
+          done
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if git diff --quiet -- '**/uv.lock'; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No lockfile changes."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Weekly dependency update"
+              echo ""
+              echo "uv lockfiles refreshed with a 7-day supply-chain quarantine (packages published after ${{ steps.cutoff.outputs.date }} excluded)."
+              echo ""
+              echo "Changed lockfiles:"
+              git diff --name-only -- '**/uv.lock' | sed 's/^/- /'
+            } > /tmp/pr_body.md
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="chore/dependency-update-$(date +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Checkout used persist-credentials: false, so re-point origin at a
+          # token-authenticated URL for both git push and the gh CLI.
+          git remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -b "$BRANCH"
+          git add '**/uv.lock'
+          git commit -m "chore(deps): weekly uv lockfile update ($(date +%Y-%m-%d))"
+          git push -u --force origin "$BRANCH"
+
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            echo "PR already exists for $BRANCH; branch updated."
+          else
+            gh pr create \
+              --title "chore(deps): weekly uv lockfile update ($(date +%Y-%m-%d))" \
+              --body-file /tmp/pr_body.md \
+              --base main
+          fi
