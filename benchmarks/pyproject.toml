@@ -1,0 +1,29 @@
+[project]
+name = "claude-code-multi-model-benchmarks"
+version = "0.1.0"
+description = "SWE benchmark harness: drive a coding assistant through dataset tasks non-interactively and score the artifacts"
+requires-python = ">=3.10"
+dependencies = [
+    # HTTP client used by the headless runner and replay scripts
+    "requests>=2.32.0",
+    # Parse the benchmark dataset YAML files
+    "pyyaml>=6.0",
+    # Typed, validated models for the dataset schema and run metrics
+    "pydantic>=2.7.0",
+    # Charts and numerics for the report / cost-quality visualizations
+    "matplotlib>=3.7.0",
+    "numpy>=1.26.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "bandit>=1.7.0",
+    "types-requests>=2.32.0",
+    "types-pyyaml>=6.0",
+]
+
+# These scripts drive an external coding assistant (Claude Code) and score its
+# artifacts; they do not import the model runtimes. Install them in their own
+# venv with `uv sync` and run with `uv run` from this directory.
