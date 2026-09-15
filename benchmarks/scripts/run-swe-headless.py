@@ -3176,7 +3176,8 @@ def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
         print("PROMPT:")
         print(prompt)
         print("\nCOMMAND:")
-        print(" ".join(cmd))
+        cmd_display = list(cmd)  # credentials are never in cmd; api_key goes via env var
+        print(" ".join(cmd_display))
 
 
 def _summary_is_retryable(summary: dict[str, Any]) -> bool:
