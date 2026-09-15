@@ -23,7 +23,8 @@ They are large, generated, or irrelevant to code changes — walking them wastes
 When a task is unscoped, the source worth reading lives under:
 
 - `self-hosted/` — the vLLM and Ollama self-hosting paths (scripts, model docs, clients)
-- `bedrock/` — the Bedrock multi-model path
+- `benchmarks/` — harness scripts, datasets, and runner config
+- `bedrock/` — Bedrock proxy setup (LiteLLM config, scripts)
 - top-level `README.md` and each subdirectory's `README.md`
 
 ## Conventions
