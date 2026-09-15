@@ -1,432 +1,157 @@
-# Claude Code Multi-Model
+<h1 align="center">Agentic Coding Harness and Benchmarks</h1>
 
-[![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg)](LICENSE)
-[![Bedrock](https://img.shields.io/badge/Amazon-Bedrock-blue)](https://docs.aws.amazon.com/bedrock/latest/userguide/models-endpoint-availability.html)
-[![Models: 45](https://img.shields.io/badge/Models-45%20from%2011%20providers-orange)](./)
+<p align="center">
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT--0-yellow.svg" alt="License: MIT-0"></a>
+<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/models-endpoint-availability.html"><img src="https://img.shields.io/badge/Amazon-Bedrock-blue" alt="Bedrock"></a>
+<a href="./"><img src="https://img.shields.io/badge/Models-45%20from%2011%20providers-orange" alt="Models: 45"></a>
+</p>
+
+<p align="center">
+<a href="docs/benchmark-your-own-repo.md">Benchmark your own repo</a> |
+<a href="docs/hosting-paths.md">Hosting paths</a> |
+<a href="docs/how-a-run-works.md">How a run works</a> |
+<a href="docs/getting-started.md">Getting started</a> |
+<a href="docs/cost-per-task-methodology.md">Cost methodology</a>
+</p>
+
+<p align="center">
+<video src="https://github.com/user-attachments/assets/84f60f0f-cd7d-4513-b90b-37a0ffb5feed" controls width="820">
+Your browser cannot play this video inline. <a href="https://github.com/user-attachments/assets/84f60f0f-cd7d-4513-b90b-37a0ffb5feed">Download the swe-router explainer</a>.
+</video>
+</p>
+
+<p align="center"><em>swe-router in about 70 seconds: the right model, handed to the developer for each task, while the platform team benchmarks once and spends less.</em></p>
 
 > **This is sample code intended for demonstration and learning purposes only.**
 > It is not meant for production use. Review and harden all scripts, configurations,
 > and IAM permissions before using in any production or sensitive environment.
 
-## Overview
+## What this is
 
-This repository does **two** things, in this order:
+This repository holds a benchmark harness and a skill that reads what the harness measures.
 
-1. **Run [Claude Code](https://docs.anthropic.com/en/docs/claude-code) against
-   non-Anthropic models.** Claude Code is Anthropic's command-line coding agent;
-   by default it talks only to Anthropic's own models. Here it's wired up to
-   any of 45 foundation models on Amazon Bedrock (Qwen, DeepSeek, Kimi, MiniMax,
-   Mistral, GPT-OSS, GLM, Gemma, Nemotron, Palmyra, plus the 7 native Anthropic
-   models), or to any open-source model you self-host on an EC2 GPU instance.
-2. **Measure how well each of those models actually does coding work.** Once you
-   can swap models freely, the next question is: which model is good enough for
-   which task? The repo ships two complementary evaluation modes — the
-   **`/swe` skill**, a per-task Software Engineering benchmark you point at any
-   GitHub repo (5 tasks × 6 models already populated for `mcp-gateway-registry`,
-   GPT-judged), and the **HumanEval benchmark**, a single-function `pass@1`
-   suite with published cross-model results.
+1. **The benchmark harness** drives real coding tasks from real repositories through a coding agent, across models and hosting paths, and an independent judge scores each result. It produces a **cost/quality Pareto frontier for your code**: the models where nothing else scores higher for less money.
+2. **[`swe-router`](vend/swe-router/README.md)** installs into a developer's coding assistant. Before a substantial task it reads that frontier and names the cheapest model that clears the bar for the work in front of them. It recommends a model and stops. The developer switches.
 
-The first half is plumbing; the second is what makes the plumbing decision-grade.
+A platform team runs the benchmark on a schedule, and every developer's assistant reads the result before each task.
 
-### How it runs Claude Code on non-Anthropic models
+## Step 1 — Benchmark, and get a frontier
 
-Without modifying Claude Code. Claude Code speaks the Anthropic Messages API,
-but most other models speak the OpenAI Chat Completions API. The repo bridges
-that gap in two different ways depending on where the model lives.
-
-**Path 1 — Amazon Bedrock (managed, pay-per-token).** Claude Code points at a
-local [LiteLLM](https://github.com/BerriAI/litellm) proxy that translates
-Anthropic Messages requests to OpenAI Chat Completions and forwards them to
-Bedrock's [`bedrock-mantle` endpoint](https://docs.aws.amazon.com/bedrock/latest/userguide/inference.html).
-Native Anthropic models on Bedrock skip the proxy and go direct. Best for model
-variety with zero infrastructure to manage.
-
-**Path 2 — Self-hosted on EC2 (your VPC, fixed GPU cost).** Claude Code points
-at an [Ollama](https://ollama.com/) server running on an EC2 GPU instance, reached
-through an SSH tunnel that forwards `localhost:11434` to the EC2 instance. Ollama
-accepts Anthropic-Messages requests natively, so no proxy or format translation is
-needed — the SSH tunnel itself is the entire "bridge." No public ingress, no API
-keys on the wire. Best for data sovereignty (tokens never leave your AWS account),
-air-gapped or compliance-sensitive environments, and high-volume workloads where
-the fixed hourly GPU cost beats per-token Bedrock pricing.
-
-The two paths share the same `/swe` and HumanEval evaluation harnesses, so quality
-and cost numbers are directly comparable. They differ only in where the model
-runs and how Claude Code reaches it.
-
-| Path | Models | Cost Model | Best For |
-|------|--------|------------|----------|
-| [**Bedrock**](bedrock/) | 45 models from 11 providers | Pay-per-token | Model variety, zero infrastructure |
-| [**Self-Hosted (EC2)**](self-hosted/) | Any Ollama/vLLM model | Fixed hourly GPU cost | Data sovereignty, air-gapped, unlimited tokens |
-
-### How it measures the models
-
-Two evaluation modes ship with the repo. Pick the one that matches the question
-you're trying to answer:
-
-| Mode | What it measures | Where the work lives |
-|------|------------------|----------------------|
-| **[SWE skill](#evaluation-1--swe-skill-real-world-tasks)** (real-world tasks) | Can the model take a real software-engineering problem in a real repo from idea to a complete design package — GitHub issue spec, low-level design, expert review, testing plan? | [.claude/skills/swe/](.claude/skills/swe/) → produces artifacts under [benchmarks/swe-benchmark-data/](benchmarks/swe-benchmark-data/) |
-| **[HumanEval](#evaluation-2--humaneval-single-function-pass1)** (single-function pass@1) | On 164 small self-contained Python tasks, does the model emit a function body that passes the hidden unit tests? | [bedrock/benchmark/humaneval_runner.py](bedrock/benchmark/humaneval_runner.py) |
-
-> **"SWE" here means software engineering in general — not [SWE-bench](https://www.swebench.com/),
-> the specific benchmark dataset.** The skill in this repo lets you run any model
-> against any task in any repo of your choosing. It is a *harness*, not a fixed
-> benchmark set. Compare results across models on the same task, or compare a
-> single model across tasks of varying difficulty.
-
-**What you get end to end:**
-
-- Run Claude Code with **45 Bedrock models** (7 native Anthropic + 38 third-party) on the managed path, **or** any open-source model you self-host on an EC2 GPU instance (Ollama / vLLM)
-- A one-command **LiteLLM proxy** for the Bedrock path that handles Anthropic↔OpenAI translation, tool calling, and streaming (the self-hosted path uses Ollama directly via SSH tunnel, no proxy)
-- An interactive **model picker** and per-model launch scripts
-- A **`/swe` skill** for repo-grounded SWE benchmarking, plus a **`/summarize`** skill for after-action reporting (token usage, errors, themes per run)
-- A reproducible **HumanEval benchmark** with cross-model pass@1 + per-token-cost numbers
-- A **GPT-judged 5×6 SWE matrix** comparing model quality on real refactor / security tasks (full matrix and findings in [Evaluation 1 → Worked example](#worked-example-mcp-gateway-registry) below). At a glance (avg % across 5 tasks, scored 0–100):
-
-  | Rank | Model | Avg score |
-  |-----:|-------|----------:|
-  | 🥇 | Claude Opus 4.8 | **89.95%** |
-  | 🥈 | Kimi (combined) | 82.15% |
-  | 🥉 | Qwen Coder Next | 79.80% |
-  | 4 | Mistral Devstral 2 123B | 75.95% |
-  | 5 | MiniMax M2.5 | 74.70% |
-  | 6 | Qwen 3.6 35B (self-hosted) | 69.70% |
-
-## Architecture
-
-### Bedrock path
-
-```mermaid
-flowchart TD
-    CC["Claude Code CLI<br/>POST /v1/messages"]
-    Proxy["LiteLLM Proxy<br/>Anthropic ↔ OpenAI format"]
-    BedrockA["Amazon Bedrock<br/>───────────────<br/>7 Anthropic models<br/>Opus · Sonnet · Haiku"]
-    BedrockM["Amazon Bedrock (mantle endpoint)<br/>───────────────<br/>38 third-party models<br/>Qwen · Kimi · DeepSeek · Mistral …"]
-    SpacerL[" "]:::ghost
-
-    CC -- "Anthropic Messages" --> BedrockA
-    CC -- "Anthropic Messages" --> Proxy
-    Proxy -- "/v1/chat/completions" --> BedrockM
-    BedrockA ~~~ SpacerL
-
-    classDef agent fill:#E5E7EB,stroke:#6B7280,color:#111827
-    classDef proxy fill:#EDE9FE,stroke:#7C3AED,color:#3B0764
-    classDef bedrock fill:#FFF3E0,stroke:#FF9900,color:#1F2937
-    classDef ghost fill:none,stroke:none,color:#FFFFFF00
-    class CC agent
-    class Proxy proxy
-    class BedrockA,BedrockM bedrock
-```
-
-Anthropic models go **direct** to Bedrock — no proxy needed since both speak
-the Anthropic Messages format. Third-party models go through the **LiteLLM
-proxy**, which translates the Anthropic Messages format Claude Code speaks
-into the OpenAI Chat Completions format those models expose on Bedrock.
-
-**Why a proxy?** Amazon Bedrock supports three inference APIs on the
-`bedrock-mantle` endpoint —
-[Anthropic Messages](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-messages-api.html),
-[OpenAI Chat Completions](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions-mantle.html),
-and [OpenAI Responses](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html)
-— but only **Claude/Anthropic models** are reachable through Messages.
-Non-Anthropic models (Qwen, DeepSeek, Kimi, Mistral, etc.) are reachable
-only through the OpenAI-compatible APIs. [LiteLLM](https://github.com/BerriAI/litellm)
-sits between Claude Code and Bedrock, translating Anthropic Messages to
-OpenAI Chat Completions for those non-Anthropic models.
-
-**Why this endpoint?** `bedrock-mantle` is Amazon Bedrock's
-[OpenAI-compatible endpoint](https://docs.aws.amazon.com/bedrock/latest/userguide/inference.html)
-for non-Anthropic foundation models. It exposes Chat Completions and
-Responses (the same shapes OpenAI's own SDKs use) and supports API-key auth
-or AWS SigV4. All 38 third-party models on this endpoint support tool
-calling and streaming natively — no per-model configuration needed.
-
-### Self-hosted path
-
-```mermaid
-flowchart TD
-    CC["Claude Code CLI<br/>ANTHROPIC_BASE_URL=<br/>http://localhost:11434"]
-    EC2["EC2 GPU instance<br/>Ollama (Anthropic Messages compatible)<br/>open-source model"]
-
-    CC -- "SSH tunnel<br/>localhost:11434 → EC2:11434" --> EC2
-
-    classDef agent fill:#E5E7EB,stroke:#6B7280,color:#111827
-    classDef ec2 fill:#FFF3E0,stroke:#FF9900,color:#1F2937
-    class CC agent
-    class EC2 ec2
-```
-
-Claude Code is pointed at `localhost`; the SSH tunnel transparently forwards
-every request to Ollama on the EC2 instance. No public ingress, no API keys
-— the only network path in is SSH.
-
-## Why this repo exists, briefly
-
-A coding agent session is token-heavy: tool calls, file reads, edits, and
-reasoning steps all consume input and output tokens. On Amazon Bedrock, frontier
-models cost roughly **5–20× more per token** than the cheapest non-Anthropic
-models on the same endpoint. Running every task on a frontier model is the most
-expensive default; running every task on the cheapest model risks worse output.
-
-The interesting question is *how much quality you actually lose* by routing
-routine tasks to a cheaper model — and that depends on the task and the model.
-The two evaluation modes below exist to make that question answerable with
-data, not opinion.
-
-## Evaluation 1 — SWE skill (real-world tasks)
-
-The `/swe` skill runs Claude Code (backed by whichever model you've selected)
-through a real software-engineering task in a real repository, and lands four
-artifacts on disk that capture the model's reasoning end-to-end. The artifacts
-are designed to be read by either a human reviewer or a separate LLM-as-judge.
-
-**Pipeline per run:**
+One command per model. The `/benchmark` skill runs the pre-flight checks, the harness over a dataset, and the judge:
 
 ```
-{any-github-repo} ──► /swe ──► benchmarks/swe-benchmark-data/
-                                  └─ {repo-name}/
-                                      └─ {problem-name}/
-                                          └─ {model-name}/
-                                              ├─ github-issue.md   # spec
-                                              ├─ lld.md            # design
-                                              ├─ review.md         # critique
-                                              └─ testing.md        # test plan
+/benchmark provider=bedrock model=claude-opus-5 dataset=dataset/mcp-gateway-registry-v2.yaml agent=omp
 ```
 
-The skill **stops at design**. It does not modify production code, run tests,
-or open PRs. Whether the design is any good is a downstream evaluation step you
-control: read the artifacts yourself, or feed them to another LLM judge.
+`agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh):
 
-A second skill, `/summarize`, runs *after* `/swe` and produces a per-run report
-covering artifact completeness, error signals from the session, token usage
-broken down by model and cache type, and recurring themes from the conversation.
-Useful when you're comparing many model+task combinations and don't want to eyeball
-every transcript.
-
-### Scoring rubric (LLM-as-judge)
-
-Each of the 4 artifacts is scored 0–100 by an independent ChatGPT session — a
-cross-lineage judge that does not share training with most of the contestants.
-Within each artifact, the judge applies the same 4-criterion rubric, **25
-points per criterion, summing to 100**:
-
-| Criterion | 0–25 each | What the judge evaluates |
-|-----------|-----------|--------------------------|
-| **Completeness** | 25 | Did the artifact identify all affected files, dependencies, and components? Any obvious touchpoints (Terraform, IAM, Docker, tests, docs) missed? |
-| **Correctness** | 25 | Are the proposed changes technically right? Would the design actually work? Are AWS service patterns idiomatic (e.g. ECS `secrets` block vs custom boto3 code)? |
-| **Specificity** | 25 | Concrete file paths, line numbers, code snippets, resource names — or vague hand-waving ("update the relevant files")? Could a junior engineer implement this artifact alone? |
-| **Risk awareness** | 25 | Rollback strategy, backwards-compat, deployment cutover, edge cases (cold start, secret rotation, token expiry, etc.) — enumerated or ignored? |
-
-**Artifact total = sum of 4 criteria (0–100).**
-**Task score = mean of the 4 artifact totals (also 0–100).**
-
-Calibration: the judge is instructed that a median artifact should score around
-60–70, not 85; 90+ is reserved for genuinely excellent work; hallucinated files
-or functions lose at least 10 points off Correctness. Results are reported in
-a 5×6 matrix (rows = tasks, columns = models). Per-cell JSON with criterion
-breakdowns and judge notes lives at `{task}/{model}/judge-gpt.json`. The
-aggregated matrix + synthesis is in
-[`benchmarks/swe-benchmark-data/mcp-gateway-registry/JUDGE_RESULTS.md`](benchmarks/swe-benchmark-data/mcp-gateway-registry/JUDGE_RESULTS.md).
-
-### Worked example: `mcp-gateway-registry`
-
-The repo ships a fully-populated worked example so you can see the harness
-producing real artifacts before pointing it at your own code. The example
-target is [agentic-community/mcp-gateway-registry](https://github.com/agentic-community/mcp-gateway-registry)
-at tag `1.24.4`, with **5 tasks × 6 models = 30 artifact bundles** on disk:
-
-| # | Problem | Difficulty | Source |
-|---|---------|-----------|--------|
-| 1 | `remove-faiss` | Medium | Upstream [#1285](https://github.com/agentic-community/mcp-gateway-registry/issues/1285) / [#452](https://github.com/agentic-community/mcp-gateway-registry/issues/452) |
-| 2 | `remove-efs-from-terraform-aws-ecs` | Medium | Upstream [#1286](https://github.com/agentic-community/mcp-gateway-registry/issues/1286) |
-| 3 | `ssrf-hardening-outbound-url-validation` | Medium | Upstream [#1282](https://github.com/agentic-community/mcp-gateway-registry/issues/1282) |
-| 4 | `migrate-ecs-env-vars-to-secrets-manager` | High | Upstream [#1134](https://github.com/agentic-community/mcp-gateway-registry/issues/1134) |
-| 5 | `replace-keycloak-db-password-with-rds-iam` | High | Upstream [#1303](https://github.com/agentic-community/mcp-gateway-registry/issues/1303) |
-
-**Models benchmarked:** Claude Opus 4.8, Kimi K2 Thinking / K2.5, Mistral Devstral 2 123B, MiniMax M2.5, Qwen Coder Next (all via Bedrock proxy), and Qwen 3.6 35B (self-hosted, vLLM on g6e.12xlarge).
-
-**Cross-model scores (GPT-judged):** each artifact bundle was scored 0–100 by
-an independent ChatGPT session against the [4-criterion × 25-point rubric](#scoring-rubric-llm-as-judge)
-above. Per-cell breakdowns with criterion scores and judge notes are in
-`{task}/{model}/judge-gpt.json`; the consolidated report is in
-[`benchmarks/swe-benchmark-data/mcp-gateway-registry/JUDGE_RESULTS.md`](benchmarks/swe-benchmark-data/mcp-gateway-registry/JUDGE_RESULTS.md).
-
-#### Results — 5 × 6 matrix
-
-All cells are percentages (0–100%), averaged across the 4 artifacts per (task × model). Bold = top score in row.
-
-| Task | Opus 4.8 | Kimi¹ | Devstral 123B | MiniMax M2.5 | Qwen Coder Next | Qwen 3.6 35B² | Task avg |
-|------|----------:|-------:|--------------:|-------------:|----------------:|---------------:|---------:|
-| `remove-faiss` | **90.8%** | 87.8% ᵀ | 77.8% | 73.5% | 80.8% | 80.2% | 81.8% |
-| `remove-efs-from-terraform-aws-ecs` | **90.8%** | 83.5% ᵀ | 83.8% | 76.0% | 80.2% | 75.2% | 81.6% |
-| `ssrf-hardening-outbound-url-validation` | **90.0%** | 66.2% ᵀ | 70.5% | 69.2% | 85.8% | 71.2% | 75.5% |
-| `migrate-ecs-env-vars-to-secrets-manager` | **90.5%** | 87.0% ⁵ | 75.0% | 78.5% | 80.8% | 63.0% | 79.1% |
-| `replace-keycloak-db-password-with-rds-iam` | **87.8%** | 86.2% ⁵ | 72.8% | 76.2% | 71.5% | 58.8% | 75.5% |
-
-¹ Kimi variant: ᵀ = K2 Thinking (tasks 1–3), ⁵ = K2.5 (tasks 4–5; substituted mid-benchmark after K2 Thinking's Bedrock backend started hanging requests).
-² Qwen 3.6 35B ran self-hosted via vLLM on g6e.12xlarge (4x L40S), not through the Bedrock proxy.
-
-#### Per-model leaderboard
-
-| Rank | Model | Avg score | # tasks |
-|-----:|-------|----------:|--------:|
-| 🥇 | Claude Opus 4.8 | **89.95%** | 5 |
-| 🥈 | Kimi (combined K2 Thinking + K2.5) | **82.15%** | 5 |
-| 🥉 | Qwen Coder Next | 79.80% | 5 |
-| 4 | Mistral Devstral 2 123B | 75.95% | 5 |
-| 5 | MiniMax M2.5 | 74.70% | 5 |
-| 6 | Qwen 3.6 35B (self-hosted) | 69.70% | 5 |
-
-#### What the data says
-
-- **Opus 4.8 wins every row** by 3–24 points. Per-cell delta to the
-  second-place model is small relative to the 10–25× per-token cost ratio.
-- **Kimi is a clear #2**, with a known dip on SSRF where K2 Thinking
-  under-enumerated edge cases (66.2% vs Opus's 90.0%).
-- **Mid/budget tier is not a clean ordering.** Qwen has the highest mid-tier
-  average but only because of one outlier — strip SSRF out and Qwen,
-  Devstral, and MiniMax are within ~2 points of each other. Devstral wins
-  `remove-efs`, MiniMax wins `keycloak-iam`.
-- **SSRF was the genuine hardest task** (76.3% avg, 23.8-point spread), not
-  the README-labelled "High" tasks. Security work rewards edge-case
-  enumeration (private IPs, DNS rebinding, redirect handling) which the
-  mid-tier under-delivered on.
-- **Qwen has a coder-specialist sweet spot**: best mid-tier result on SSRF
-  (85.8%), weakest on Keycloak IAM (71.5%, lost points to hallucinated AWS
-  mechanics — judge flagged "impossible ideas such as Lambda valueFrom for
-  ECS secrets").
-- **Qwen 3.6 35B (self-hosted) is usable on bounded cleanup, drops on AWS-heavy tasks.** Scored 80.2% on FAISS removal and 75.2% on EFS removal but fell to 63.0% and 58.8% on the two High-difficulty AWS infrastructure tasks. The smaller parameter count shows up when the design requires multi-service Terraform orchestration.
-- **20× cost spread → ~21-point quality spread.** At the top of the field, the budget models are genuinely good enough for routine refactors and code-heavy work; frontier reasoning earns its premium on AWS-specific infrastructure design.
-
-> **The example repo is the example, not the contract.** `/swe` works against
-> any GitHub URL — clone the target you actually care about, write the task
-> description, and run.
-
-> **Important — "SWE" ≠ [SWE-bench](https://www.swebench.com/).** This skill
-> evaluates a model on *whatever problem you give it in whatever repo you point
-> it at*, and the output is artifacts you grade. SWE-bench is a fixed dataset
-> of GitHub issues with hidden test patches that grade themselves. The two are
-> complementary, not interchangeable.
-
-## Evaluation 2 — HumanEval (single-function pass@1)
-
-We measured model quality on the public [HumanEval](https://github.com/openai/human-eval)
-benchmark (164 tasks), driving each task through Claude Code backed by each model
-and scoring with standard `pass@1`:
-
-| Model | pass@1 | Input $/1M | Output $/1M |
-| --- | --- | --- | --- |
-| Claude Sonnet 4.6 | 97.6% | $3.00 | $15.00 |
-| Kimi K2.5 | 96.3% | $0.60 | $3.00 |
-| DeepSeek V3.2 | 94.5% | $0.62 | $1.85 |
-| Qwen Coder Next | 91.5% | $0.50 | $1.20 |
-| Qwen Coder 30B | 90.9% | $0.15 | $0.62 |
-
-Budget models reach 93–99% of the frontier model's pass rate at a fraction of
-the cost. Prices are on-demand Standard-tier rates for US East from the
-[Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/) at the
-time of writing. Full method, caveats, and reproduce steps in
-[bedrock/README.md](bedrock/README.md#benchmark-humaneval).
-
-> **HumanEval is single-function code generation, not agentic editing.**
-> Frontier models score 95%+ on HumanEval but only 40–80% on SWE-bench.
-> Use HumanEval as a quick quality signal for picking a routing tier; use the
-> SWE skill above (or your own production traffic) when you need to know whether
-> a model can actually navigate a real codebase.
-
-## Prerequisites
-
-- An **AWS account** with [Amazon Bedrock model access](https://console.aws.amazon.com/bedrock/home#/modelaccess) enabled for the models you want to use
-- **AWS credentials** configured locally (`aws configure`, an IAM role, or AWS SSO)
-- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** installed
-- **Python 3.9+** (for the LiteLLM proxy and Bedrock token generation)
-- For the self-hosted path: permission to launch an **EC2 GPU instance** (e.g. `g6e.xlarge`)
-
-> The `bedrock-mantle` endpoint used for third-party models is currently available in **`us-east-1`**.
-
-## Get Started
-
-Pick a path that matches what you're trying to do.
-
-**Just want to run a non-Anthropic model through Claude Code?**
-
-- **[bedrock/README.md](bedrock/README.md)** — Bedrock path. Start the LiteLLM
-  proxy and run Claude Code against any of the 45 models with `claude-model.sh`.
-- **[self-hosted/README.md](self-hosted/README.md)** — Self-hosted path. Provision
-  a GPU instance, install Ollama, open an SSH tunnel, and run Claude Code against
-  a model in your VPC.
-
-**Want to benchmark a model on a real repo task?**
-
-- **[benchmarks/swe-benchmark-data/README.md](benchmarks/swe-benchmark-data/README.md)** —
-  Set up the example target (`mcp-gateway-registry`) or any GitHub repo of your
-  choosing, then invoke `/swe` from Claude Code. The skill produces four
-  artifacts per (problem, model) pair, ready for human or LLM-judge review.
-
-**Want the published HumanEval cross-model numbers?**
-
-- See the [Evaluation 2 — HumanEval](#evaluation-2--humaneval-single-function-pass1)
-  table above; full method and reproduce steps in
-  [bedrock/README.md](bedrock/README.md#benchmark-humaneval).
-
-## Comparison
-
-| | Bedrock | Self-Hosted (EC2) |
-|---|---|---|
-| **Models** | 45 from 11 providers | Any GGUF/HF model |
-| **Pricing** | Per-token ($0.15-$15/M) | Per-hour ($0.84-$4.60/hr GPU) |
-| **Setup time** | 5 minutes | 15-20 minutes |
-| **Latency** | Varies by model (a few sec to minutes/task) | Depends on GPU + model size |
-| **Data location** | AWS Bedrock service | Your VPC, your instance |
-| **Best when** | Variable workload, model variety | Fixed workload, data sovereignty |
-| **Break-even** | < ~2M tokens/hour | > ~2M tokens/hour |
-
-## Repository Structure
-
-```text
-claude-code-multi-model/
-├── README.md                  ← You are here
-├── LICENSE                    MIT-0
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── SECURITY.md
-├── SUPPORT.md
-├── THIRD_PARTY                Third-party dependency attributions
-├── .github/                   Issue and pull-request templates
-├── .claude/                   ← Claude Code skills shipped with the repo
-│   └── skills/
-│       ├── swe/               /swe — drive a model through a SWE task on any repo
-│       └── summarize/         /summarize — post-run report for a /swe attempt
-├── benchmarks/                ← Output of /swe runs (the SWE evaluation mode)
-│   └── swe-benchmark-data/
-│       ├── README.md          5-task list, /swe invocation steps, 4×25 rubric
-│       └── mcp-gateway-registry/
-│           ├── repo/          (gitignored — contributor clones source here)
-│           ├── JUDGE_RESULTS.md       Consolidated 5×6 matrix + synthesis
-│           ├── remove-faiss/
-│           │   └── {model}/           github-issue.md, lld.md, review.md, testing.md, judge-gpt.json
-│           ├── remove-efs-from-terraform-aws-ecs/
-│           ├── ssrf-hardening-outbound-url-validation/
-│           ├── migrate-ecs-env-vars-to-secrets-manager/
-│           └── replace-keycloak-db-password-with-rds-iam/
-├── bedrock/                   ← Bedrock path (38 third-party + 7 Anthropic)
-│   ├── README.md              Full Bedrock setup guide + HumanEval benchmark
-│   ├── pyproject.toml         uv-managed deps for proxy + benchmark
-│   ├── scripts/               setup-proxy.sh, claude-model.sh, mantle-token.sh
-│   ├── config/                litellm-config.yaml, claude-proxy-settings.json
-│   └── benchmark/             HumanEval runner (humaneval_runner.py) + pass@1 results
-└── self-hosted/               ← EC2 self-hosted path (Ollama/vLLM)
-    ├── README.md              Full EC2 setup guide
-    ├── SETUP-GUIDE.md         Step-by-step GPU instance provisioning
-    ├── scripts/               ec2-setup.sh, claude-local.sh, tunnel.sh, bench.sh
-    └── config/                settings.template.json
+```bash
+./benchmarks/scripts/run-e2e-benchmark.sh \
+  --provider bedrock \
+  --model claude-opus-5 \
+  --dataset benchmarks/dataset/mcp-gateway-registry-v2.yaml \
+  --agent omp \
+  --skill swe3
 ```
 
-## See Also
+Repeat across your model list. The harness writes per-task `metrics.json` and `eval.json` under `benchmarks/swe-benchmark-data/`; the generators then plot the cost/quality frontier for your repo and model set.
 
-- [HumanEval](https://github.com/openai/human-eval) — the public benchmark used above
-- [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) — Official Claude Code documentation
+## Step 2 — Developers install the skill
+
+Five files copied into a skills directory. The skill imports nothing and needs no build step. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
+
+```bash
+curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash
+```
+
+To install it once for every repository instead, send it to your home directory:
+
+```bash
+curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash -s -- --dir ~/.claude/skills
+```
+
+Re-run either command to upgrade; your edited `allowed-models.txt` is kept.
+
+`swe-router` engages on its own before a substantial task. It sets a quality floor from what happens if the change is wrong, classifies how hard the task is, and takes the cheapest model that clears that floor at that tier. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
+
+Install notes and the file-by-file breakdown: **[vend/swe-router/README.md](vend/swe-router/README.md)**.
+
+---
+
+## Behind the two steps
+
+### Why measure it yourself
+
+A vendor's benchmark reports how their model does on their tasks. A public leaderboard may already be saturated, because models get tuned toward well-known test sets. Neither one tells you what a model costs to run *your* code, and that is the number a budget answers to.
+
+**[Why this exists](docs/why-this-exists.md)**
+
+### The three hosting paths
+
+Anthropic models direct on Bedrock, open-weight models on Bedrock through a LiteLLM proxy, or a model you self-host on an EC2 GPU node with vLLM. All three run the same agent, tasks, skill and scoring. Only the place the model runs changes.
+
+| Path | Models | Cost model | Best for |
+|---|---|---|---|
+| Bedrock (Anthropic) | Claude Opus, Sonnet, Haiku | Pay-per-token | Native Anthropic models, prompt caching |
+| Bedrock (LiteLLM proxy) | 38 third-party models (Qwen, DeepSeek, Kimi, Mistral, GLM, Gemma…) | Pay-per-token | Model variety, zero infrastructure |
+| Self-hosted vLLM on EC2 | Any open-weight model | Fixed hourly GPU cost | Data sovereignty, high-volume, air-gapped |
+
+**[The three hosting paths](docs/hosting-paths.md)**
+
+### What a single benchmark run does
+
+Clone the repo at a pinned ref, drive the agent through the task, record tokens, latency and turns, score the artifacts against a rubric, then discard the clone.
+
+**[What a single run does](docs/how-a-run-works.md)** · [Harness reference](benchmarks/docs/harness-reference.md)
+
+### Benchmark your own repositories
+
+The harness works against any GitHub repository. Write a dataset YAML naming your own repos and pinned refs, run it, and the same generators build your frontier. Git ignores your run artifacts, so private code never lands in version control.
+
+**[Benchmark your own repositories](docs/benchmark-your-own-repo.md)**
+
+### Getting started
+
+On a fresh box, the `/setup-machine` skill inspects the instance, reports every missing dependency with the reason it needs it, and installs them. It adds the GPU stack only when the box has a GPU.
+
+**[Getting started](docs/getting-started.md)** · [Repository structure](docs/repository-structure.md)
+
+---
+
+## Documentation map
+
+| Document | What it covers |
+|---|---|
+| [docs/why-this-exists.md](docs/why-this-exists.md) | Why measure harness × model on your own repositories, and what each benchmark measures. |
+| [docs/hosting-paths.md](docs/hosting-paths.md) | The three hosting paths, what each is best for, and the proxy that makes path 2 work. |
+| [docs/how-a-run-works.md](docs/how-a-run-works.md) | One benchmark run end to end: clone, drive the agent, record metrics, score artifacts. |
+| [docs/benchmark-your-own-repo.md](docs/benchmark-your-own-repo.md) | Dataset format and steps to build a frontier on your own code. |
+| [docs/getting-started.md](docs/getting-started.md) | Prerequisites and setup sequence, from a fresh box to a first benchmark run. |
+| [docs/repository-structure.md](docs/repository-structure.md) | What lives where in this repository. |
+| [docs/cost-per-task-methodology.md](docs/cost-per-task-methodology.md) | How cost numbers are derived: the two cost lenses, prompt-caching accounting, and why agentic coding is prefill-bound. |
+| [docs/serving-optimization-notes.md](docs/serving-optimization-notes.md) | Portable vLLM serving defaults and why we do not tune prefill knobs per model. |
+| [docs/gpu-selection-h200-vs-l40s.md](docs/gpu-selection-h200-vs-l40s.md) | Which GPU to serve on: H200 slice vs L40S, same model and config. |
+| [docs/vision.md](docs/vision.md) | The north star: a cost-aware harness that routes each task to the right model on the frontier automatically. |
+| [benchmarks/README.md](benchmarks/README.md) | The benchmark harness landing page: the three hosting paths, how a run works, datasets. |
+| [benchmarks/docs/harness-reference.md](benchmarks/docs/harness-reference.md) | Full harness reference: config, the `/swe2`/`/swe3` flow, context-window handling, and LLM-as-judge scoring. |
+| [benchmarks/docs/path-anthropic-on-bedrock.md](benchmarks/docs/path-anthropic-on-bedrock.md) | Path 1 setup: benchmarking Anthropic models directly on Amazon Bedrock. |
+| [benchmarks/docs/path-open-weight-on-bedrock-litellm.md](benchmarks/docs/path-open-weight-on-bedrock-litellm.md) | Path 2 setup: open-weight models on Amazon Bedrock through the LiteLLM proxy. |
+| [benchmarks/docs/path-self-hosted-vllm.md](benchmarks/docs/path-self-hosted-vllm.md) | Path 3 setup: self-hosting a model on vLLM and pointing the harness at it. |
+| [benchmarks/docs/end-to-end-self-hosted-run.md](benchmarks/docs/end-to-end-self-hosted-run.md) | Full run-book for an end-to-end self-hosted benchmark. |
+| [self-hosted/vllm/README.md](self-hosted/vllm/README.md) | Standing up a vLLM server: install, tensor parallelism, tool-call parsers, serving-config reference. |
+| [self-hosted/vllm/models/](self-hosted/vllm/models/) | Per-model serving guides for every supported model (HF repo, context window, TP size, tool parser, hardware fit). |
+| [docs/omp-setup.md](docs/omp-setup.md) | Setting up the `omp` coding agent harness. |
+| [docs/kiro-cli-setup.md](docs/kiro-cli-setup.md) | The kiro-cli harness: install, sign-in, headless use, and Bedrock-managed constraint. |
+| [.claude/skills/setup-machine/SKILL.md](.claude/skills/setup-machine/SKILL.md) | **Start here on a new machine.** What `/setup-machine` installs and why. |
+| [.claude/skills/swe-router/SKILL.md](.claude/skills/swe-router/SKILL.md) | The `/swe-router` skill: how it picks the cheapest model that clears the quality bar. |
+| [docs/release-notes/](docs/release-notes/) | Release notes per version. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) / [SECURITY.md](SECURITY.md) / [SUPPORT.md](SUPPORT.md) | How to contribute, report a vulnerability, and get help. |
+
+## See also
+
+- [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) — official Claude Code documentation
+- [benchmarks/README.md](benchmarks/README.md) — harness landing page
+- [self-hosted/vllm/README.md](self-hosted/vllm/README.md) — standing up a self-hosted vLLM server (Path 3)
 
 ## License
 
