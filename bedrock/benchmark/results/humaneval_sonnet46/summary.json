@@ -1,9 +1,0 @@
-[
-  {
-    "model": "claude-sonnet-46",
-    "pass_at_1": 97.6,
-    "passed": 160,
-    "total": 164,
-    "avg_time": 3.4
-  }
-]
