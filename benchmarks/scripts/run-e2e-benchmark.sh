@@ -81,7 +81,7 @@ REPO_ROOT="$(dirname "$BENCHMARKS_DIR")"
 VLLM_DIR="$REPO_ROOT/self-hosted/vllm"
 
 # Defaults
-AGENT="claude"            # coding agent: claude (Claude Code) or pi (pi agent)
+AGENT="claude"            # coding agent: claude, pi, omp, kiro, or codex
 SKILL="swe3"              # SWE skill: swe3 (single-agent, default) or swe2 (multi-agent)
 PROVIDER=""
 MODEL=""
