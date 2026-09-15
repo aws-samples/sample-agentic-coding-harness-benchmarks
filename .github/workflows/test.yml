@@ -1,0 +1,69 @@
+name: Test
+
+# The PR merge gate. For each uv project it installs deps and runs the same
+# checks we run locally (see each project's dev-workflow docs and the top-level
+# CLAUDE.md): ruff lint, mypy on the type-checked modules, and the unittest
+# suite. Kept in sync with what contributors run by hand before committing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "Test: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: benchmarks
+            dir: benchmarks
+            # Modules with clean type annotations; matches the documented
+            # dev-workflow mypy target so CI does not fail on never-checked files.
+            mypy: scripts/dataset_loader.py scripts/runner_config.py
+          - name: self-hosted-vllm
+            dir: self-hosted/vllm
+            mypy: ""
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # Full history: build_vended_models.py stamps models.json's
+          # measured_on from the frontier JSON's last commit date, and
+          # test_build_vended_models.py checks the committed file still matches
+          # what the generator produces. A shallow clone cannot see that commit,
+          # so the generator falls back to the checkout mtime and the test fails
+          # on every PR regardless of whether the file is actually stale.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        working-directory: ${{ matrix.dir }}
+        run: uv sync
+
+      - name: Ruff lint
+        working-directory: ${{ matrix.dir }}
+        run: uv run ruff check .
+
+      - name: Mypy
+        if: matrix.mypy != ''
+        working-directory: ${{ matrix.dir }}
+        run: uv run mypy ${{ matrix.mypy }}
+
+      - name: Unit tests
+        working-directory: ${{ matrix.dir }}
+        run: uv run python -m unittest discover -s tests

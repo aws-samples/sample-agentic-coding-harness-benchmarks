@@ -1,6 +1,0 @@
-{
-  "env": {
-    "CLAUDE_CODE_USE_BEDROCK": "0",
-    "DISABLE_PROMPT_CACHING": "1"
-  }
-}
