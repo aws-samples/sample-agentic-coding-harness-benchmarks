@@ -83,8 +83,12 @@ def extract_from_jsonl(jsonl_path):
                 metrics["api_calls"] += 1
                 metrics["input_tokens"] += usage.get("input_tokens", 0)
                 metrics["output_tokens"] += usage.get("output_tokens", 0)
-                metrics["cache_read_tokens"] += usage.get("cache_read_input_tokens", 0) or usage.get("cache_read", 0)
-                metrics["cache_write_tokens"] += usage.get("cache_creation_input_tokens", 0) or usage.get("cache_write", 0)
+                metrics["cache_read_tokens"] += usage.get(
+                    "cache_read_input_tokens", 0
+                ) or usage.get("cache_read", 0)
+                metrics["cache_write_tokens"] += usage.get(
+                    "cache_creation_input_tokens", 0
+                ) or usage.get("cache_write", 0)
 
             # Count tool uses
             entry_type = entry.get("type") or ""
@@ -105,8 +109,12 @@ def extract_from_jsonl(jsonl_path):
     # Compute wall clock from timestamps
     if metrics["first_timestamp"] and metrics["last_timestamp"]:
         try:
-            t1 = datetime.fromisoformat(metrics["first_timestamp"].replace("Z", "+00:00"))
-            t2 = datetime.fromisoformat(metrics["last_timestamp"].replace("Z", "+00:00"))
+            t1 = datetime.fromisoformat(
+                metrics["first_timestamp"].replace("Z", "+00:00")
+            )
+            t2 = datetime.fromisoformat(
+                metrics["last_timestamp"].replace("Z", "+00:00")
+            )
             metrics["wall_clock_seconds"] = (t2 - t1).total_seconds()
         except (ValueError, TypeError):
             pass
@@ -196,7 +204,7 @@ def main():
         if "task_cost_usd" in updated:
             print(f"  Task cost: ${updated['task_cost_usd']:.4f}")
         if "cache_hit_rate" in updated:
-            print(f"  Cache hit rate: {updated['cache_hit_rate']*100:.1f}%")
+            print(f"  Cache hit rate: {updated['cache_hit_rate'] * 100:.1f}%")
     else:
         print(json.dumps(extracted, indent=2))
 

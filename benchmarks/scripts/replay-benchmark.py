@@ -94,12 +94,26 @@ def main():
     )
     parser.add_argument("jsonl", help="Path to the replay.jsonl file")
     parser.add_argument("endpoint", help="vLLM base URL (e.g. http://127.0.0.1:8000)")
-    parser.add_argument("lines", nargs="?", type=int, default=1,
-                        help="Number of lines to replay (default: 1, 0 = full file)")
-    parser.add_argument("--model", default=None, help="Model name to use (auto-detected if not set)")
-    parser.add_argument("--max-tokens", type=int, default=16000, help="Max output tokens per call")
-    parser.add_argument("--concurrency", "-c", type=int, default=1,
-                        help="Number of concurrent requests (default: 1)")
+    parser.add_argument(
+        "lines",
+        nargs="?",
+        type=int,
+        default=1,
+        help="Number of lines to replay (default: 1, 0 = full file)",
+    )
+    parser.add_argument(
+        "--model", default=None, help="Model name to use (auto-detected if not set)"
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=16000, help="Max output tokens per call"
+    )
+    parser.add_argument(
+        "--concurrency",
+        "-c",
+        type=int,
+        default=1,
+        help="Number of concurrent requests (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -127,7 +141,9 @@ def main():
     print(f"  Concurrency: {concurrency}")
     print(f"  Max output tokens: {args.max_tokens}")
     print(f"{'=' * 90}")
-    print(f"{'Call':>4} | {'Input tok':>10} | {'Output tok':>10} | {'Latency ms':>10} | {'Prompt t/s':>10} | {'Gen t/s':>10} | {'Status'}")
+    print(
+        f"{'Call':>4} | {'Input tok':>10} | {'Output tok':>10} | {'Latency ms':>10} | {'Prompt t/s':>10} | {'Gen t/s':>10} | {'Status'}"
+    )
     print(f"{'-' * 90}")
 
     results = [None] * num_lines
@@ -136,7 +152,9 @@ def main():
     def run_call(i):
         call_data = json.loads(all_lines[i])
         messages = call_data.get("messages", [])
-        result = send_request(args.endpoint, messages, model=model, max_tokens=args.max_tokens)
+        result = send_request(
+            args.endpoint, messages, model=model, max_tokens=args.max_tokens
+        )
         result["call_number"] = i
         return i, result
 
@@ -148,7 +166,9 @@ def main():
             results[i] = result
 
             if result["error"]:
-                print(f"{i:4d} | {'ERROR':>10} | {'-':>10} | {result['latency_ms']:>10.0f} | {'-':>10} | {'-':>10} | {result.get('status_code', '?')}: {result.get('body', '')[:40]}")
+                print(
+                    f"{i:4d} | {'ERROR':>10} | {'-':>10} | {result['latency_ms']:>10.0f} | {'-':>10} | {'-':>10} | {result.get('status_code', '?')}: {result.get('body', '')[:40]}"
+                )
                 continue
 
             input_tok = result["input_tokens"]
@@ -161,7 +181,9 @@ def main():
             result["prompt_tokens_per_sec"] = prompt_tps
             result["generation_tokens_per_sec"] = gen_tps
 
-            print(f"{i:4d} | {input_tok:>10,} | {output_tok:>10,} | {latency:>10,.0f} | {prompt_tps:>10,.1f} | {gen_tps:>10,.1f} | {result['stop_reason']}")
+            print(
+                f"{i:4d} | {input_tok:>10,} | {output_tok:>10,} | {latency:>10,.0f} | {prompt_tps:>10,.1f} | {gen_tps:>10,.1f} | {result['stop_reason']}"
+            )
 
     total_elapsed = time.time() - total_start
 
@@ -171,14 +193,20 @@ def main():
         total_input = sum(r["input_tokens"] for r in successful)
         total_output = sum(r["output_tokens"] for r in successful)
         total_latency = sum(r["latency_ms"] for r in successful)
-        avg_prompt_tps = round(total_input / (total_latency / 1000), 1) if total_latency > 0 else 0
-        avg_gen_tps = round(total_output / (total_latency / 1000), 1) if total_latency > 0 else 0
+        avg_prompt_tps = (
+            round(total_input / (total_latency / 1000), 1) if total_latency > 0 else 0
+        )
+        avg_gen_tps = (
+            round(total_output / (total_latency / 1000), 1) if total_latency > 0 else 0
+        )
 
         print(f"\n{'=' * 80}")
         print(f"Summary ({len(successful)} successful / {num_lines} total calls)")
         print(f"  Total input tokens:    {total_input:>12,}")
         print(f"  Total output tokens:   {total_output:>12,}")
-        print(f"  Total latency:         {total_latency:>12,.0f} ms ({total_latency/1000:.1f}s)")
+        print(
+            f"  Total latency:         {total_latency:>12,.0f} ms ({total_latency / 1000:.1f}s)"
+        )
         print(f"  Wall clock:            {total_elapsed:>12,.1f}s")
         print(f"  Avg prompt tok/s:      {avg_prompt_tps:>12,.1f}")
         print(f"  Avg generation tok/s:  {avg_gen_tps:>12,.1f}")
