@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<!--
+  Cost vs. quality frontier, model identities abstracted.
+
+  Every point is a real measurement from one omp / /swe3 run over 21 tasks. Only
+  the model NAMES are replaced: a closed-source model becomes its tier, an
+  open-weight model becomes its architecture (parameter count, dense vs MoE),
+  which is the part a reader actually needs to reason about serving cost.
+
+  Render: open in a browser, or screenshot the .viz-root element.
+  Output lives at docs/images/cost-quality-abstracted.png.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cost vs. quality — model classes</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --grid:           #e8e8e6;
+    --axis:           #d3d3d0;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #77756f;
+    --series-closed:  #2a78d6;
+    --series-open:    #eb6834;
+    --series-front:   #1baf7a;
+  }
+  html, body { margin: 0; padding: 0; background: #fcfcfb; }
+  .viz-root {
+    background: var(--surface-1);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    width: 1600px;
+    padding: 28px 32px 20px;
+    box-sizing: border-box;
+  }
+  .viz-title {
+    font-size: 27px; font-weight: 600; color: var(--text-primary);
+    margin: 0 0 4px; letter-spacing: -0.01em;
+  }
+  .viz-sub {
+    font-size: 15px; color: var(--text-secondary); margin: 0 0 6px; line-height: 1.45;
+  }
+  .viz-note {
+    font-size: 12.5px; color: var(--text-muted); margin: 12px 0 0; line-height: 1.5;
+  }
+  svg { display: block; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--axis); stroke-width: 1; }
+  .tick-text {
+    font-size: 14px; fill: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .axis-title { font-size: 15.5px; fill: var(--text-secondary); font-weight: 500; }
+  .pt-label { font-size: 14px; fill: var(--text-primary); }
+  .leader { stroke: #b9b8b3; stroke-width: 1; fill: none; }
+  .front-line {
+    stroke: var(--series-front); stroke-width: 2;
+    stroke-dasharray: 7 5; fill: none; stroke-linejoin: round;
+  }
+  .legend-text { font-size: 14.5px; fill: var(--text-secondary); }
+  .panel-title { font-size: 14.5px; font-weight: 600; fill: var(--text-primary); }
+  .panel-head {
+    font-size: 13px; fill: var(--text-muted); font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .panel-cell {
+    font-size: 13.5px; fill: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .panel-cell.k { fill: var(--text-primary); }
+  .panel-step { font-size: 13.5px; fill: var(--series-front); font-weight: 600;
+                font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <h1 class="viz-title">Cost vs. quality on one repository — by model class</h1>
+  <p class="viz-sub">
+    Mean judge score against mean cost per task, 19 models over 21 software-engineering tasks in a single repository.
+    Model names are abstracted to their class: closed-source models by tier, open-weight models by architecture.
+  </p>
+
+  <svg id="chart" viewBox="0 0 1536 872" width="1536" height="872"
+       role="img" aria-label="Scatter plot of mean task score against mean cost per task for 19 model classes, with a cost/quality frontier.">
+    <defs>
+      <linearGradient id="frontFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#1baf7a" stop-opacity="0.10"/>
+        <stop offset="100%" stop-color="#1baf7a" stop-opacity="0.015"/>
+      </linearGradient>
+    </defs>
+    <g id="plot"></g>
+  </svg>
+
+  <p class="viz-note">
+    <strong>What is abstracted.</strong> Only the model names. Every score, cost and position is the measured value from the run.
+    A closed-source point is named by its tier and generation; an open-weight point by parameter count and dense/MoE architecture,
+    since that is what determines the hardware it needs.
+    <br>
+    <strong>Cost basis — the two colours are not one currency.</strong> A closed-source point is a metered per-token bill.
+    An open-weight point is hardware-derived: the GPU instance's hourly rate divided by measured throughput at a stated concurrency.
+    Compare within a colour; across colours the comparison is directional only.
+    Scores come from one repository and one run per task, so treat the ordering as more portable than the absolute numbers.
+  </p>
+</div>
+
+<script>
+const DATA = [
+  // closed-source, metered bill
+  { c: 11.9543, s: 82.83, k: 'closed', label: 'Closed frontier (current)',  la: 'end',    dx:  -8, dy: -20 },
+  { c:  4.6715, s: 76.97, k: 'closed', label: 'Closed mid-tier (current)',  la: 'start',  dx:  18, dy:   6 },
+  { c:  7.3514, s: 75.60, k: 'closed', label: 'Closed frontier (prior 4)',  la: 'start',  dx:  18, dy: -14 },
+  { c:  5.3200, s: 74.69, k: 'closed', label: 'Closed frontier (prior 3)',  la: 'start',  dx:  18, dy:  26, leader: true },
+  { c:  4.9500, s: 70.64, k: 'closed', label: 'Closed frontier (prior 2)',  la: 'start',  dx:  18, dy:   6 },
+  { c:  4.1800, s: 66.32, k: 'closed', label: 'Closed frontier (prior 1)',  la: 'end',    dx: -16, dy:   6 },
+  { c:  0.7648, s: 56.18, k: 'closed', label: 'Closed small (prior)',       la: 'start',  dx:  34, dy:  -8, leader: true },
+
+  // open-weight, self-hosted, hardware-derived
+  { c:  7.0397, s: 80.11, k: 'open',   label: 'Open MoE 743B / 39B active', la: 'start',  dx:  18, dy:  20 },
+  { c:  4.3310, s: 79.17, k: 'open',   label: 'Open MoE 2.8T / 104B active',la: 'end',    dx: -16, dy: -14 },
+  { c:  1.4738, s: 78.48, k: 'open',   label: 'Open dense 27B',             la: 'start',  dx:  18, dy:  16 },
+  { c:  2.4709, s: 69.13, k: 'open',   label: 'Open MoE 1.06T, code-tuned', la: 'middle', dx:  10, dy: -44, leader: true },
+  { c:  2.1485, s: 61.66, k: 'open',   label: 'Open MoE 685B / 37B active', la: 'middle', dx:  -6, dy: -44, leader: true },
+  { c:  3.5108, s: 60.51, k: 'open',   label: 'Open MoE 256-expert (newer)',la: 'middle', dx:   0, dy: -44, leader: true },
+  { c:  0.8708, s: 59.74, k: 'open',   label: 'Open dense 31B',             la: 'start',  dx:  18, dy: -14 },
+  { c:  0.2594, s: 59.24, k: 'open',   label: 'Open MoE 35B / 3B active',   la: 'start',  dx:  18, dy:  20 },
+  { c:  0.4765, s: 55.94, k: 'open',   label: 'Open MoE 256-expert',        la: 'start',  dx:  38, dy:  24, leader: true },
+  { c:  0.7862, s: 51.15, k: 'open',   label: 'Open dense 123B, code-tuned',la: 'start',  dx:  22, dy:   6 },
+  { c:  0.3993, s: 42.59, k: 'open',   label: 'Open dense 2.5B',            la: 'start',  dx:  26, dy: -10, leader: true },
+  { c:  0.4733, s: 42.58, k: 'open',   label: 'Open MoE 30B / 3B, code',    la: 'start',  dx:  26, dy:  16, leader: true },
+];
+
+// The cost/quality frontier: nothing scores at least as high for at most the cost.
+const FRONTIER = [
+  { c: 0.2594, s: 59.24 }, { c: 0.8708, s: 59.74 }, { c: 1.4738, s: 78.48 },
+  { c: 4.3310, s: 79.17 }, { c: 7.0397, s: 80.11 }, { c: 11.9543, s: 82.83 },
+];
+
+const PANEL = [
+  ['Open MoE 35B / 3B',   '59.2', '$0.26',  ''],
+  ['Open dense 31B',      '59.7', '$0.87',  '+0.5 / +$0.61'],
+  ['Open dense 27B',      '78.5', '$1.47',  '+18.8 / +$0.60'],
+  ['Open MoE 2.8T',       '79.2', '$4.33',  '+0.7 / +$2.86'],
+  ['Open MoE 743B',       '80.1', '$7.04',  '+0.9 / +$2.71'],
+  ['Closed frontier',     '82.8', '$11.95', '+2.7 / +$4.91'],
+];
+
+const L = 116, R = 1516, T = 30, B = 762;          // plot rect
+const XMAX = 13.2, YMIN = 38, YMAX = 86;
+const xs = c => L + (c / XMAX) * (R - L);
+const ys = s => B - ((s - YMIN) / (YMAX - YMIN)) * (B - T);
+const NS = 'http://www.w3.org/2000/svg';
+
+const el = (n, a = {}, txt) => {
+  const e = document.createElementNS(NS, n);
+  for (const [k, v] of Object.entries(a)) e.setAttribute(k, v);
+  if (txt != null) e.textContent = txt;
+  return e;
+};
+const g = document.getElementById('plot');
+const add = e => { g.appendChild(e); return e; };
+
+// ---- grid + axes: solid hairlines, one shade off the surface ----
+for (let s = 40; s <= 85; s += 5) {
+  add(el('line', { class: 'grid-line', x1: L, x2: R, y1: ys(s), y2: ys(s) }));
+  add(el('text', { class: 'tick-text', x: L - 14, y: ys(s) + 5, 'text-anchor': 'end' }, String(s)));
+}
+for (let c = 0; c <= 13; c += 1) {
+  add(el('line', { class: 'grid-line', x1: xs(c), x2: xs(c), y1: T, y2: B }));
+  add(el('text', { class: 'tick-text', x: xs(c), y: B + 26, 'text-anchor': 'middle' },
+      c === 0 ? '0' : '$' + c));
+}
+add(el('line', { class: 'axis-line', x1: L, x2: R, y1: B, y2: B }));
+add(el('line', { class: 'axis-line', x1: L, x2: L, y1: T, y2: B }));
+
+add(el('text', { class: 'axis-title', x: (L + R) / 2, y: B + 60, 'text-anchor': 'middle' },
+    'Mean cost per task'));
+const yt = add(el('text', { class: 'axis-title', 'text-anchor': 'middle',
+    transform: `translate(${L - 62},${(T + B) / 2}) rotate(-90)` }, 'Mean task score (0–100)'));
+
+// ---- frontier: fill under, then the dashed line ----
+const fillPts = [[xs(FRONTIER[0].c), B], ...FRONTIER.map(p => [xs(p.c), ys(p.s)]),
+                 [xs(FRONTIER[FRONTIER.length - 1].c), B]];
+add(el('polygon', { points: fillPts.map(p => p.join(',')).join(' '), fill: 'url(#frontFill)' }));
+add(el('polyline', { class: 'front-line',
+    points: FRONTIER.map(p => `${xs(p.c)},${ys(p.s)}`).join(' ') }));
+
+// ---- leader lines, then markers, then labels ----
+const colour = k => k === 'closed' ? 'var(--series-closed)' : 'var(--series-open)';
+
+DATA.forEach(d => {
+  if (!d.leader) return;
+  const x = xs(d.c), y = ys(d.s);
+  const tx = x + d.dx, ty = y + d.dy;
+  // stop the leader short of both the marker and the text
+  const endY = d.dy < 0 ? ty + 6 : ty - 12;
+  add(el('path', { class: 'leader', d: `M ${x} ${y + (d.dy < 0 ? -8 : 8)} L ${x} ${endY} L ${tx - (d.la === 'start' ? 6 : 0)} ${endY}` }));
+});
+
+DATA.forEach(d => {
+  const x = xs(d.c), y = ys(d.s);
+  add(el('circle', { cx: x, cy: y, r: 6.5, fill: colour(d.k),
+                     stroke: 'var(--surface-1)', 'stroke-width': 2 }));
+});
+
+DATA.forEach(d => {
+  add(el('text', { class: 'pt-label', x: xs(d.c) + d.dx, y: ys(d.s) + d.dy,
+                   'text-anchor': d.la }, d.label));
+});
+
+// ---- inset panel: the frontier, step by step ----
+const PX = 966, PY = 372, PW = 548, ROW = 26;
+add(el('text', { class: 'panel-title', x: PX, y: PY }, 'Each step along the frontier'));
+add(el('text', { class: 'panel-head', x: PX,       y: PY + 28 }, 'Model class'));
+add(el('text', { class: 'panel-head', x: PX + 300, y: PY + 28, 'text-anchor': 'end' }, 'Quality'));
+add(el('text', { class: 'panel-head', x: PX + 392, y: PY + 28, 'text-anchor': 'end' }, '$/task'));
+add(el('text', { class: 'panel-head', x: PX + PW,  y: PY + 28, 'text-anchor': 'end' }, 'Step (quality / cost)'));
+add(el('line', { class: 'grid-line', x1: PX, x2: PX + PW, y1: PY + 38, y2: PY + 38 }));
+PANEL.forEach((r, i) => {
+  const y = PY + 60 + i * ROW;
+  add(el('text', { class: 'panel-cell k', x: PX,       y }, r[0]));
+  add(el('text', { class: 'panel-cell',   x: PX + 300, y, 'text-anchor': 'end' }, r[1]));
+  add(el('text', { class: 'panel-cell',   x: PX + 392, y, 'text-anchor': 'end' }, r[2]));
+  add(el('text', { class: r[3].startsWith('+18') ? 'panel-step' : 'panel-cell',
+                   x: PX + PW, y, 'text-anchor': 'end' }, r[3] || '—'));
+});
+
+// ---- legend: always present for >= 2 series ----
+const LX = 966, LY = 632;
+const legend = [
+  ['line', 'var(--series-front)', 'Cost/quality frontier'],
+  ['dot',  'var(--series-closed)', 'Closed-source — metered per-token bill'],
+  ['dot',  'var(--series-open)',   'Open-weight, self-hosted — hardware-derived'],
+];
+legend.forEach((it, i) => {
+  const y = LY + i * 27;
+  if (it[0] === 'line') {
+    add(el('line', { x1: LX, x2: LX + 30, y1: y - 4, y2: y - 4, stroke: it[1],
+                     'stroke-width': 2, 'stroke-dasharray': '7 5' }));
+  } else {
+    add(el('circle', { cx: LX + 15, cy: y - 4, r: 6.5, fill: it[1],
+                       stroke: 'var(--surface-1)', 'stroke-width': 2 }));
+  }
+  add(el('text', { class: 'legend-text', x: LX + 42, y }, it[2]));
+});
+</script>
+</body>
+</html>
