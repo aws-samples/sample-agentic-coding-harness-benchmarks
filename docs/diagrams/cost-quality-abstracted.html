@@ -78,12 +78,13 @@
 <div class="viz-root">
   <h1 class="viz-title">Cost vs. quality on one repository — by model class</h1>
   <p class="viz-sub">
-    Mean judge score against mean cost per task, 19 models over 21 software-engineering tasks in a single repository.
-    Model names are abstracted to their class: closed-source models by tier, open-weight models by architecture.
+    Mean judge score against mean cost per task, over 21 software-engineering tasks in a single repository.
+    Eleven of the nineteen models measured are shown: the six on the frontier, plus five that mark out the spread.
+    Model names are abstracted to their class — closed-source models by tier and generation, open-weight models by architecture.
   </p>
 
   <svg id="chart" viewBox="0 0 1536 872" width="1536" height="872"
-       role="img" aria-label="Scatter plot of mean task score against mean cost per task for 19 model classes, with a cost/quality frontier.">
+       role="img" aria-label="Scatter plot of mean task score against mean cost per task for eleven model classes — the six on the cost/quality frontier plus five off it. A dashed line connects the frontier points, which step steeply from 59 to 78 points of score for under a dollar more per task, then rise only a few points across the remaining tenfold increase in cost.">
     <defs>
       <linearGradient id="frontFill" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#1baf7a" stop-opacity="0.10"/>
@@ -94,9 +95,10 @@
   </svg>
 
   <p class="viz-note">
-    <strong>What is abstracted.</strong> Only the model names. Every score, cost and position is the measured value from the run.
-    A closed-source point is named by its tier and generation; an open-weight point by parameter count and dense/MoE architecture,
-    since that is what determines the hardware it needs.
+    <strong>What is abstracted, and what is left out.</strong> Only the model names. Every score, cost and position is the measured value from the run.
+    A closed-source point is named by tier and generation — generation numbers ascend with recency and are relative to this chart, not a vendor's version numbering.
+    An open-weight point is named by parameter count and dense/MoE architecture, since that is what determines the hardware it needs.
+    Eight further measured models are omitted to keep the chart readable; all of them sit below the frontier, so none of them changes its shape.
     <br>
     <strong>Cost basis — the two colours are not one currency.</strong> A closed-source point is a metered per-token bill.
     An open-weight point is hardware-derived: the GPU instance's hourly rate divided by measured throughput at a stated concurrency.
@@ -106,29 +108,24 @@
 </div>
 
 <script>
+// A readable subset of the 19 models measured: the six on the frontier, plus five
+// off-frontier points that each make a distinct point about the spread. Generation
+// numbers ascend with recency and are relative to this set only.
 const DATA = [
   // closed-source, metered bill
-  { c: 11.9543, s: 82.83, k: 'closed', label: 'Closed frontier (current)',  la: 'end',    dx:  -8, dy: -20 },
-  { c:  4.6715, s: 76.97, k: 'closed', label: 'Closed mid-tier (current)',  la: 'start',  dx:  18, dy:   6 },
-  { c:  7.3514, s: 75.60, k: 'closed', label: 'Closed frontier (prior 4)',  la: 'start',  dx:  18, dy: -14 },
-  { c:  5.3200, s: 74.69, k: 'closed', label: 'Closed frontier (prior 3)',  la: 'start',  dx:  18, dy:  26, leader: true },
-  { c:  4.9500, s: 70.64, k: 'closed', label: 'Closed frontier (prior 2)',  la: 'start',  dx:  18, dy:   6 },
-  { c:  4.1800, s: 66.32, k: 'closed', label: 'Closed frontier (prior 1)',  la: 'end',    dx: -16, dy:   6 },
-  { c:  0.7648, s: 56.18, k: 'closed', label: 'Closed small (prior)',       la: 'start',  dx:  34, dy:  -8, leader: true },
+  { c: 11.9543, s: 82.83, k: 'closed', label: 'Closed frontier (gen 3, current)', la: 'end',   dx:  -8, dy: -20 },
+  { c:  4.6715, s: 76.97, k: 'closed', label: 'Closed mid-tier (gen 3)',          la: 'start', dx:  18, dy:   6 },
+  { c:  5.3200, s: 74.69, k: 'closed', label: 'Closed frontier (gen 2)',          la: 'start', dx:  18, dy:   6 },
+  { c:  4.1800, s: 66.32, k: 'closed', label: 'Closed frontier (gen 1)',          la: 'end',   dx: -16, dy:   6 },
 
   // open-weight, self-hosted, hardware-derived
-  { c:  7.0397, s: 80.11, k: 'open',   label: 'Open MoE 743B / 39B active', la: 'start',  dx:  18, dy:  20 },
-  { c:  4.3310, s: 79.17, k: 'open',   label: 'Open MoE 2.8T / 104B active',la: 'end',    dx: -16, dy: -14 },
-  { c:  1.4738, s: 78.48, k: 'open',   label: 'Open dense 27B',             la: 'start',  dx:  18, dy:  16 },
-  { c:  2.4709, s: 69.13, k: 'open',   label: 'Open MoE 1.06T, code-tuned', la: 'middle', dx:  10, dy: -44, leader: true },
-  { c:  2.1485, s: 61.66, k: 'open',   label: 'Open MoE 685B / 37B active', la: 'middle', dx:  -6, dy: -44, leader: true },
-  { c:  3.5108, s: 60.51, k: 'open',   label: 'Open MoE 256-expert (newer)',la: 'middle', dx:   0, dy: -44, leader: true },
-  { c:  0.8708, s: 59.74, k: 'open',   label: 'Open dense 31B',             la: 'start',  dx:  18, dy: -14 },
-  { c:  0.2594, s: 59.24, k: 'open',   label: 'Open MoE 35B / 3B active',   la: 'start',  dx:  18, dy:  20 },
-  { c:  0.4765, s: 55.94, k: 'open',   label: 'Open MoE 256-expert',        la: 'start',  dx:  38, dy:  24, leader: true },
-  { c:  0.7862, s: 51.15, k: 'open',   label: 'Open dense 123B, code-tuned',la: 'start',  dx:  22, dy:   6 },
-  { c:  0.3993, s: 42.59, k: 'open',   label: 'Open dense 2.5B',            la: 'start',  dx:  26, dy: -10, leader: true },
-  { c:  0.4733, s: 42.58, k: 'open',   label: 'Open MoE 30B / 3B, code',    la: 'start',  dx:  26, dy:  16, leader: true },
+  { c:  7.0397, s: 80.11, k: 'open',   label: 'Open MoE 743B / 39B active',       la: 'start', dx:  18, dy:  20 },
+  { c:  4.3310, s: 79.17, k: 'open',   label: 'Open MoE 2.8T / 104B active',      la: 'end',   dx: -16, dy: -14 },
+  { c:  1.4738, s: 78.48, k: 'open',   label: 'Open dense 27B',                   la: 'start', dx:  18, dy:  16 },
+  { c:  2.4709, s: 69.13, k: 'open',   label: 'Open MoE 1.06T, code-tuned',       la: 'start', dx:  18, dy:   6 },
+  { c:  0.8708, s: 59.74, k: 'open',   label: 'Open dense 31B',                   la: 'start', dx:  18, dy: -14 },
+  { c:  0.2594, s: 59.24, k: 'open',   label: 'Open MoE 35B / 3B active',         la: 'start', dx:  18, dy:  20 },
+  { c:  0.3993, s: 42.59, k: 'open',   label: 'Open dense 2.5B',                  la: 'start', dx:  22, dy:   6 },
 ];
 
 // The cost/quality frontier: nothing scores at least as high for at most the cost.
