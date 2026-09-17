@@ -46,6 +46,10 @@ One command per model. The `/benchmark` skill runs the pre-flight checks, the ha
 
 `agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh) (`--provider bedrock|litellm|vllm --model ... --dataset ... --agent claude|pi|omp|kiro|codex --skill swe2|swe3`). Repeat across your model list, then the generators plot the cost/quality frontier for your repo and model set.
 
+![Cost versus quality for 19 model classes on one repository. Model names are abstracted: closed-source models are named by tier, open-weight models by parameter count and dense or MoE architecture. A dashed frontier connects the models that nothing else beats on both score and cost.](docs/images/cost-quality-abstracted.png)
+
+**What the shape tells you, and why you should measure your own.** The frontier is a step function, not a line: most of the quality is reached early and cheaply, and past that point each further point of score costs several times more per task. Where those steps fall depends on your code, your tasks and your hardware — the picture above is one repository and one run per task, so the useful output is the *shape*, not the numbers. Model identities are abstracted to their class deliberately: the class is what tells you the hardware a model needs, and that is the part that transfers. Regenerate it for your own repositories with the chart scripts in [`benchmarks/scripts/`](benchmarks/scripts/). The source for this diagram is [`docs/diagrams/cost-quality-abstracted.html`](docs/diagrams/cost-quality-abstracted.html).
+
 ## Step 2 — Developers install the skill
 
 Five files copied into a skills directory. The skill imports nothing and needs no build step. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
@@ -112,6 +116,7 @@ Where to read more, by topic:
 | [docs/benchmark-your-own-repo.md](docs/benchmark-your-own-repo.md) | The dataset format and the steps to build a frontier on your own code, with tips for writing tasks that produce comparable runs. |
 | [docs/getting-started.md](docs/getting-started.md) | Prerequisites and the setup sequence, from a fresh box to a first benchmark run. |
 | [docs/repository-structure.md](docs/repository-structure.md) | What lives where in this repository. |
+| [docs/diagrams/cost-quality-abstracted.html](docs/diagrams/cost-quality-abstracted.html) | Source for the cost/quality diagram above — a self-contained HTML page with the data inline. Edit and re-screenshot to regenerate. |
 | [.claude/skills/setup-machine/SKILL.md](.claude/skills/setup-machine/SKILL.md) | **Start here on a new machine.** What `/setup-machine` inspects and installs, why each component is needed, where the vLLM venv lands on a small root disk, and what it deliberately does not do. |
 | [.claude/skills/swe-router/SKILL.md](.claude/skills/swe-router/SKILL.md) | The `/swe-router` skill: how it sets a quality floor from the consequence of a change being wrong, picks the tier table to read it against, and selects the cheapest model that clears it. Advisory -- it recommends and stops. |
 | [docs/vision.md](docs/vision.md) | The north star: a cost-aware harness that routes each task (and each phase) to the right model on the frontier -- frontier / workhorse / budget -- switching automatically. |
