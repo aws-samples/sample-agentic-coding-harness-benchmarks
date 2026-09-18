@@ -1,6 +1,6 @@
 # kiro-cli setup and benchmark-integration notes
 
-Install and configuration reference for **kiro-cli** as a coding agent (harness) for this benchmark. This file covers how to install kiro-cli, how it authenticates, how to drive it headlessly, and -- importantly -- the two ways it differs from the `pi` and `claude-code` harnesses that constrain how it can be wired into the benchmark. Read the "Benchmark integration status" section before starting the harness wiring in issue #73.
+Install and configuration reference for **kiro-cli** as a coding agent (harness) for this benchmark. This file covers how to install kiro-cli, how it authenticates, how to drive it headlessly, and -- importantly -- the two ways it differs from every other harness here: it cannot target a self-hosted endpoint, and it reports no token counts. Read the "Benchmark integration status" section before reading a kiro row in a results table, because those two constraints decide which columns it can fill.
 
 ## What kiro-cli is
 
@@ -161,13 +161,33 @@ This matters when comparing kiro-cli to the **pi** and **Claude Code** harnesses
 
 ## Benchmark integration status
 
-kiro-cli is **not yet wired** into the benchmark harness. Two properties of the tool differ from the `pi` and `claude-code` harnesses and shape how it can be integrated (tracked in issue #73):
+kiro-cli **is wired** into the benchmark harness as `--agent kiro`. Run it the same way as any other agent:
 
-1. **No self-hosted / OpenAI-compatible endpoint.** Unlike `pi` (which points at a vLLM endpoint via `--provider vllm`), kiro-cli talks only to Kiro's managed, Bedrock-backed models and authenticates through AWS. There is no base-URL or custom-endpoint setting. **A "kiro-cli against self-hosted vLLM" run -- the original framing of issue #73 -- is therefore not possible.** kiro-cli can only be benchmarked driving its own managed models.
+```bash
+./benchmarks/scripts/run-e2e-benchmark.sh \
+  --agent kiro \
+  --model claude-sonnet-5 \
+  --dataset benchmarks/dataset/mcp-gateway-registry-v2.yaml \
+  --skill swe3
+```
 
-2. **No token counts, but a credits + time signal.** `--format json` applies to `--list-models`/`--list-sessions` only; a non-interactive chat turn streams ANSI-colored text to stdout (not JSON) and does **not** report input/output token counts. It **does** print `▸ Credits: <n> • Time: <s>s` to stderr on completion (see "Headless output and metrics"). An integration would normalize **credits** (parsed from stderr), not tokens, as the cost metric, gating success on the exit code and artifact presence. This differs from `pi`/`claude-code`, which emit token- and dollar-level accounting.
+`--provider` is forced to `kiro` whenever `--agent kiro` is passed, because it is the only valid pairing. The implementation is `_build_kiro_cmd` / `_run_kiro` / `_kiro_result_from_output` in [`run-swe-headless.py`](../benchmarks/scripts/run-swe-headless.py), with `PROVIDER_KIRO` and `AGENT_KIRO` in [`runner_config.py`](../benchmarks/scripts/runner_config.py).
 
-The practical consequence: if kiro-cli is added as a third harness, it would be a **managed-model** harness (its own Kiro models, priced in **Kiro credits** -- a third cost basis alongside metered Bedrock dollars and hardware-derived self-hosted GPU-seconds, so compare within a hosting basis as the repo already does). Per-model credit weights come from `--list-models` (`rate_multiplier`); per-run credits come from the stderr summary line. It cannot be a self-hosted-vLLM harness. Confirm the scope before mirroring the `pi` wiring described in issue #73.
+Two properties of the tool differ from every other harness here, and they shape what a kiro run can and cannot report.
+
+1. **No self-hosted or OpenAI-compatible endpoint.** Unlike `pi` (which points at a vLLM endpoint via `--provider vllm`), kiro-cli talks only to Kiro's managed, Bedrock-backed models and authenticates through AWS. There is no base-URL or custom-endpoint setting, so **"kiro-cli against self-hosted vLLM" is not possible** -- kiro-cli can only be benchmarked driving its own managed models. That is why `--agent kiro` pins `--provider kiro`.
+
+2. **No token counts, but a credits + time signal.** `--format json` applies to `--list-models`/`--list-sessions` only; a non-interactive chat turn streams ANSI-colored text to stdout (not JSON) and does **not** report input/output token counts, cache accounting, or a turn count. It **does** print `▸ Credits: <n> • Time: <s>s` to stderr on completion (see "Headless output and metrics"). `_kiro_result_from_output` strips the ANSI escapes, parses those two values, and normalizes to the same result shape the other agents produce -- with `input_tokens`, `output_tokens` and `num_turns` set to **0**, success gated on the process exit code, and the raw credit figure kept as `kiro_credits` for provenance.
+
+So a kiro row in a results table carries a **quality score, a wall-clock time and a credit-derived cost, but no token or turn columns**. Quality is unaffected: the judge scores the artifacts a run produces, and that path never reads token counts.
+
+kiro is therefore a **managed-model** harness, priced in **Kiro credits** -- a third cost basis alongside metered Bedrock dollars and hardware-derived self-hosted GPU-seconds. Compare within a basis, as the repo already does elsewhere. Per-model credit weights come from `--list-models` (`rate_multiplier`); per-run credits come from the stderr summary line and already have that weight applied.
+
+### If you need token-level metrics
+
+You cannot get them from kiro-cli, and there is no side channel: Kiro's managed models run in **Kiro's** AWS account, so Bedrock model-invocation logging or CloudTrail in your own account will not see those calls.
+
+If token, cache and turn accounting is the requirement, note that `--list-models` exposes the same model families this benchmark reaches through Bedrock directly. Benchmark those models on the `bedrock` or `litellm` provider instead and you get the full accounting. Reach for `--agent kiro` when the thing you are measuring is **Kiro's own agent loop** -- its planning, tool selection and context handling -- rather than the underlying model.
 
 ## References
 
