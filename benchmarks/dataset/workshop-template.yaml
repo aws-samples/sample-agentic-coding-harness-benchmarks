@@ -1,0 +1,123 @@
+# =============================================================================
+# SWE benchmark dataset - workshop template
+# =============================================================================
+#
+# A starting point for benchmarking your OWN repositories. Copy it, do not edit
+# it in place:
+#
+#     cp dataset/workshop-template.yaml dataset/my-team.yaml
+#
+# Then replace every <REPLACE> placeholder. Validate before you run, which
+# catches a typo in seconds instead of after a clone:
+#
+#     uv run scripts/dataset_loader.py dataset/my-team.yaml
+#
+# Confirm the repositories are reachable at the refs you pinned, which catches a
+# missing credential or a mistyped tag before any task runs:
+#
+#     uv run scripts/preflight_check.py --dataset dataset/my-team.yaml --check-repos
+#
+# Then run one task end to end:
+#
+#     ./scripts/run-e2e-benchmark.sh --provider vllm --model <your-model> \
+#         --dataset dataset/my-team.yaml --agent omp --skill swe3 --count 1 --yes
+#
+# The full field reference is in benchmarks/docs/harness-reference.md. Private
+# repositories, GitHub Enterprise Server and internal certificate authorities are
+# covered in docs/benchmark-your-own-repo.md.
+#
+# -----------------------------------------------------------------------------
+# The one rule that decides whether a task measures anything
+# -----------------------------------------------------------------------------
+# `ref` must pin the release, tag or commit IMMEDIATELY BEFORE the one that
+# fixed the issue. The harness clones the repository at that ref and asks the
+# agent to do the work. Pin a ref that already contains the fix and the agent
+# finds the change already made, so the task measures nothing and every model
+# scores about the same on it.
+#
+# So for each task, find the closed issue, find the release that shipped its
+# fix, and pin the release before that one.
+#
+# -----------------------------------------------------------------------------
+# Two more things worth knowing
+# -----------------------------------------------------------------------------
+# * `ground_truth` is reviewer-only and is NEVER shown to the agent. It exists so
+#   a human can check the judge's verdict. Filling it in does not help or hint
+#   the model.
+# * `output_scope` gives this dataset its own results folder. Set it whenever two
+#   datasets target the same repository, or the folder-level run-summary.json is
+#   rebuilt over both and silently blends two task sets into one mean.
+# =============================================================================
+
+schema_version: "1.0"
+name: <REPLACE-dataset-slug>            # kebab-case id, e.g. acme-platform
+title: <REPLACE-Human-readable-title>
+description: >
+  Real tasks drawn from closed issues in our own repositories, each pinned to the
+  release before its fix shipped.
+created: <REPLACE-YYYY-MM-DD>
+
+# Fallback ref for any task that does not set its own. Always set `ref` per task
+# anyway: a shared default is what made the v1 dataset less useful than v2.
+default_ref: main
+
+# Own results folder, so this dataset never blends with another over the same repo.
+output_scope: <REPLACE-dataset-slug>
+
+# Documentary only. The harness records these in each run's metrics.json.
+metrics:
+  - input_tokens
+  - output_tokens
+  - num_turns
+  - latency_seconds
+
+complexity_levels: [trivial, low, medium, high]
+
+tasks:
+  # ---------------------------------------------------------------------------
+  # Task 1. Start with something small so the first run finishes quickly and
+  # proves the wiring: a docs page, a config passthrough, one render condition.
+  # ---------------------------------------------------------------------------
+  - id: <REPLACE-task-slug>             # stable slug; also the output folder name
+    repo: https://<REPLACE-git-host>/<org>/<repo>
+    ref: "<REPLACE-release-BEFORE-the-fix>"
+    complexity: trivial
+    tags: [<REPLACE-language>, <REPLACE-area>]
+    problem_issue_url: https://<REPLACE-git-host>/<org>/<repo>/issues/<n>
+    problem_statement: |
+      Describe the task the way a well-scoped ticket would: what to change, the
+      constraints that apply, and what "done" means. Write it so an agent can act
+      on it with nobody from your team present to answer questions.
+
+      Include anything a new engineer would need and would not guess: the file or
+      area to start in, the convention to follow, the behaviour to preserve.
+    clarifying_answers: |
+      Pre-supplied answers to the questions the skill would otherwise ask, so an
+      unattended run never stops to ask one. Optional but recommended.
+      1. Why this matters: <REPLACE>
+      2. Who is affected: <REPLACE>
+      3. Stack and constraints: <REPLACE>
+      4. Complexity: trivial
+    ground_truth:
+      approach: <REPLACE-how-it-was-actually-fixed>   # never shown to the agent
+      expectations:
+        - <REPLACE-a-point-a-correct-design-must-cover>
+      reference_url: https://<REPLACE-git-host>/<org>/<repo>/pull/<n>
+
+  # ---------------------------------------------------------------------------
+  # Task 2. Then something with real substance, so the results tell you which
+  # model to use for which class of work rather than giving one average.
+  # Aim for 10 to 20 tasks spread across all four tiers before you trust a
+  # frontier; 5 or 6 per tier is what the published datasets use.
+  # ---------------------------------------------------------------------------
+  - id: <REPLACE-second-task-slug>
+    repo: https://<REPLACE-git-host>/<org>/<repo>
+    ref: "<REPLACE-release-BEFORE-the-fix>"
+    complexity: medium
+    tags: [<REPLACE-language>, <REPLACE-area>]
+    problem_issue_url: https://<REPLACE-git-host>/<org>/<repo>/issues/<n>
+    problem_statement: |
+      <REPLACE>
+    ground_truth:
+      approach: <REPLACE>
+      reference_url: https://<REPLACE-git-host>/<org>/<repo>/pull/<n>

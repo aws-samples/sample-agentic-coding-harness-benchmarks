@@ -60,6 +60,12 @@ DEFAULT_PERMISSION_MODE = "acceptEdits"
 VALID_PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions"}
 DEFAULT_MAX_TURNS = 250
 DEFAULT_MAX_OUTPUT_TOKENS = 16000
+# API key sent to a provider=endpoint server. A self-hosted vLLM server ignores
+# the value, so a throwaway placeholder is the right default. A corporate model
+# gateway needs a real token, and a real token must not sit in a config file, so
+# `api_key_env` names an environment variable to read it from instead. See
+# RunnerConfig.resolved_api_key.
+DEFAULT_API_KEY = "local"
 # 2h per task: /swe2 implements (up to 250 turns), and a frontier model writing
 # long, thorough implementations can exceed 1h on a heavy task (observed with
 # Opus 5). A task that overruns is killed and marked failed.
@@ -151,7 +157,22 @@ AGENT_OMP = "omp"
 # OPENAI_BASE_URL / OPENAI_API_KEY). Cost is derived from token counts using
 # the local bedrock_pricing table (not metered directly by the CLI).
 AGENT_CODEX = "codex"
-VALID_AGENTS = {AGENT_CLAUDE, AGENT_PI, AGENT_KIRO, AGENT_OMP, AGENT_CODEX}
+# "strands" is a Strands Agents SDK agent. Strands has no CLI, so the harness runs
+# scripts/strands_agent_runner.py as the agent subprocess; it emits JSON-lines
+# events like pi, omp and codex. The SKILL.md loads through the Strands
+# AgentSkills plugin (the counterpart of pi's --skill), and the agent uses the
+# stock Strands shell and file_editor tools. Supports provider=bedrock
+# (BedrockModel) and provider=endpoint (OpenAIModel). Needs the optional
+# `strands` dependency group: `uv sync --group strands`. See docs/strands-setup.md.
+AGENT_STRANDS = "strands"
+VALID_AGENTS = {
+    AGENT_CLAUDE,
+    AGENT_PI,
+    AGENT_KIRO,
+    AGENT_OMP,
+    AGENT_CODEX,
+    AGENT_STRANDS,
+}
 DEFAULT_AGENT = AGENT_CLAUDE
 
 # Artifacts are grouped by the coding agent (the "harness") that produced them,
@@ -165,6 +186,7 @@ HARNESS_SLUGS = {
     AGENT_KIRO: "kiro-cli",
     AGENT_OMP: "omp",
     AGENT_CODEX: "codex",
+    AGENT_STRANDS: "strands",
 }
 
 # kiro-cli bills in credits, not tokens; the harness translates credits (parsed
@@ -335,7 +357,15 @@ class RunnerConfig(BaseModel):
         "us.anthropic.claude-opus-4-8). Left unset in the committed config so one "
         "file serves every model; supply it with --model.",
     )
-    api_key: str = Field(default="local", description="API key sent to the endpoint.")
+    api_key: str = Field(
+        default=DEFAULT_API_KEY, description="API key sent to the endpoint."
+    )
+    api_key_env: str | None = Field(
+        default=None,
+        description="Name of an environment variable holding the endpoint's API "
+        "key. When set it wins over api_key, so a real gateway token never has to "
+        "sit in a committed config file. provider=endpoint only.",
+    )
     aws_region: str | None = Field(
         default=None,
         description="AWS region for provider=bedrock (e.g. us-east-1). Falls back "
@@ -467,6 +497,11 @@ class RunnerConfig(BaseModel):
         return self.agent == AGENT_CODEX
 
     @property
+    def is_strands(self) -> bool:
+        """True when the Strands Agents runner drives the task."""
+        return self.agent == AGENT_STRANDS
+
+    @property
     def harness_slug(self) -> str:
         """Folder name for the coding agent (harness) that produced a run's artifacts.
 
@@ -531,6 +566,35 @@ class RunnerConfig(BaseModel):
             or os.environ.get("AWS_REGION")
             or os.environ.get("AWS_DEFAULT_REGION")
         )
+
+    def resolved_api_key(self) -> str:
+        """Return the API key to send to a provider=endpoint server.
+
+        Prefers the environment variable named by ``api_key_env``, so a real
+        gateway token stays out of the committed config file. Falls back to the
+        literal ``api_key``, whose ``local`` default is what a self-hosted vLLM
+        server expects and ignores.
+
+        Returns:
+            The API key to send to the endpoint.
+
+        Raises:
+            RunnerConfigError: If ``api_key_env`` names a variable that is unset
+                or empty. Silently falling back to the placeholder would send a
+                bogus key, and the agent would then fail with an authentication
+                error that never mentions the missing variable.
+        """
+        if not self.api_key_env:
+            return self.api_key
+        value = os.environ.get(self.api_key_env)
+        if not value:
+            raise RunnerConfigError(
+                f"api_key_env names '{self.api_key_env}', but that environment "
+                f"variable is unset or empty. Export it "
+                f"(export {self.api_key_env}=...) before the run, or remove "
+                "api_key_env to use the literal api_key value."
+            )
+        return value
 
     def resolved_instance_type(self) -> str | None:
         """Return the EC2 instance type the run executes on, for provenance.
@@ -628,6 +692,9 @@ class RunnerConfig(BaseModel):
             raise RunnerConfigError(
                 f"endpoint '{self.endpoint}' must start with http:// or https://"
             )
+        # Resolve the key now so a missing environment variable fails at config
+        # load, not hours into a batch when the first agent call is rejected.
+        self.resolved_api_key()
 
 
 def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -703,6 +770,11 @@ def _summarize(config: RunnerConfig) -> None:
         logger.info("  aws_region: %s", config.resolved_region())
     else:
         logger.info("  endpoint: %s", config.endpoint)
+        # Log where the key came from, never the key itself.
+        if config.api_key_env:
+            logger.info("  api_key: (from environment variable %s)", config.api_key_env)
+        else:
+            logger.info("  api_key: (from the config file's api_key field)")
     logger.info("  model: %s", config.model)
     logger.info(
         "  serving: instance_type=%s tensor_parallel_size=%s precision=%s",
@@ -741,12 +813,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("config", help="Path to the runner config YAML file")
     parser.add_argument(
         "--agent",
-        help="Override: coding agent that runs the task (claude | pi | omp | kiro)",
+        help="Override: coding agent that runs the task "
+        "(claude | pi | omp | kiro | codex | strands)",
     )
     parser.add_argument(
         "--provider", help="Override: routing provider (endpoint | bedrock)"
     )
     parser.add_argument("--endpoint", help="Override: API endpoint base URL")
+    parser.add_argument(
+        "--api-key-env",
+        help="Override: name of the environment variable holding the endpoint's "
+        "API key (wins over the config's api_key)",
+    )
     parser.add_argument("--model", help="Override: model name (as with the harness)")
     parser.add_argument("--dataset", help="Override: dataset YAML path")
     parser.add_argument(
@@ -766,6 +844,7 @@ def main() -> None:
         "agent": args.agent,
         "provider": args.provider,
         "endpoint": args.endpoint,
+        "api_key_env": args.api_key_env,
         "model": args.model,
         "dataset": args.dataset,
         "aws_region": args.aws_region,
