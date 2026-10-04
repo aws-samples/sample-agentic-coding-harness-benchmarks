@@ -126,7 +126,9 @@ class TestSweepStrayRootWrites(unittest.TestCase):
     def test_untracked_file_written_during_the_level_is_quarantined(self) -> None:
         """The github-issue.md case: a new untracked root file is moved out."""
         before = harness._root_entry_names(self.root)
-        since = time.time()
+        # Subtract 1s so the file's mtime is always >= since on filesystems
+        # with 1-second timestamp resolution (e.g. ext4 without fine-grained mtime).
+        since = time.time() - 1
         stray = self.root / "github-issue.md"
         stray.write_text("# GitHub Issue\n", encoding="utf-8")
 
