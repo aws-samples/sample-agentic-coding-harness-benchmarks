@@ -770,11 +770,6 @@ def _summarize(config: RunnerConfig) -> None:
         logger.info("  aws_region: %s", config.resolved_region())
     else:
         logger.info("  endpoint: %s", config.endpoint)
-        # Log where the credential comes from, never the credential itself.
-        if config.api_key_env:
-            logger.info("  endpoint credential: env var %s", config.api_key_env)
-        else:
-            logger.info("  endpoint credential: literal value in config file")
     logger.info("  model: %s", config.model)
     logger.info(
         "  serving: instance_type=%s tensor_parallel_size=%s precision=%s",
