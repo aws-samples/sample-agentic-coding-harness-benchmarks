@@ -22,6 +22,11 @@ _spec.loader.exec_module(bvm)
 
 _VEND_DIR = _REPO_ROOT / "vend" / "swe-router"
 
+_SKIP_COMMITTED = not (
+    _SCRIPTS_DIR.parent.parent / "docs" / "metrics" / "pareto-frontier-omp-swe3.json"
+).exists()
+_SKIP_REASON = "docs/metrics/ frontier data not present in this repo"
+
 
 def _frontier(**overrides) -> dict:
     """Build a minimal frontier JSON shaped like the real one."""
@@ -91,6 +96,7 @@ class BuildTest(unittest.TestCase):
         self.assertIn("not a selection key", note)
         self.assertIn("score_by_complexity", note)
 
+    @unittest.skipIf(_SKIP_COMMITTED, _SKIP_REASON)
     def test_a_frontier_model_can_still_lose_at_a_tier(self) -> None:
         # The reason the flags are not a selection key, pinned against the real
         # data: qwen3.8-27b is on the combined frontier and trails
@@ -142,6 +148,7 @@ class BuildTest(unittest.TestCase):
             bvm.build(_write(_frontier(all_models=[])), _REPO_ROOT)
 
 
+@unittest.skipIf(_SKIP_COMMITTED, _SKIP_REASON)
 class CommittedArtifactTest(unittest.TestCase):
     """The vended files are committed, so they are checked like any other input."""
 
