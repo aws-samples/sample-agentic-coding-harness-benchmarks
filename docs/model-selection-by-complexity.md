@@ -1,10 +1,10 @@
 # Which model for which task? Reading the v2 results as a buying decision
 
-> **Not the headline result.** The reported run is the **[oh-my-pi](omp-setup.md)** (`omp`) harness with `/swe3` on the **v2** dataset -- 18 models, 21 tasks -- in [harness-omp-swe3.md](harness-omp-swe3.md). This page covers the complexity read of the v2 dataset from the 3-model pi run. Different task sets and harnesses, so the scores here do not compare with it.
+> **Not the headline result.** The reported run is the **[oh-my-pi](omp-setup.md)** (`omp`) harness with `/swe3` on the **v2** dataset -- 18 models, 21 tasks. This page covers the complexity read of the v2 dataset from the 3-model pi run. Different task sets and harnesses, so the scores here do not compare with it.
 
 The [v2 dataset](../benchmarks/dataset/mcp-gateway-registry-v2.yaml) was built to answer a question a single leaderboard number cannot: **does the right model change with the difficulty of the work?**
 
-Three models, 21 tasks across trivial / low / medium / high, pi harness, `/swe3`. Raw numbers in [results-swe3-v2.md](results-swe3-v2.md). This page is the inference drawn from them.
+Three models, 21 tasks across trivial / low / medium / high, pi harness, `/swe3`. Raw per-task numbers land in the run artifacts under [`benchmarks/swe-benchmark-data/`](../benchmarks/swe-benchmark-data/). This page is the inference drawn from them.
 
 Everything below rests on **one run per model per task**. The short answer is that the question in the title has a worse answer than expected: **complexity is not the axis that decides which model you need.**
 
@@ -130,6 +130,6 @@ Note also that the closed mid-tier model has nearly closed the distance to the c
 - **The 6% figure is a variance decomposition over 21 tasks**, not a significance test. It says the tier labels are a weak instrument on this data; it does not prove complexity is irrelevant in general.
 - **"Precision demand" is a post-hoc reading, not a measured variable.** It fits all 21 tasks and it explains the trivial-tier split cleanly, but it was named after looking at the results. Testing it properly means labelling tasks by that property *before* the next run.
 - **One task was re-tiered on the strength of this run.** `build-docker-images-from-uv-lock` moved `low` → `medium` after all three models scored it worst-in-tier. Tier labels are a judgement, and a wrong one propagates straight into guidance.
-- **One harness, one repo.** pi on `mcp-gateway-registry`. Harness effects are real and measured elsewhere in this repo — see [best-harness-selection.md](best-harness-selection.md).
+- **One harness, one repo.** pi on `mcp-gateway-registry`. Harness effects are real and measured separately: the same model can land on a different cost/quality point under a different harness, so a single-harness read does not settle which harness to run.
 - **Only three models, all from the same provider family.** The self-hosted open-weight models on the v1 charts have not been run on v2, so nothing here speaks to the cross-hosting question.
 - **Costs are metered Bedrock prices** and not comparable with the hardware-derived figures used for self-hosted models. See [cost-per-task-methodology.md](cost-per-task-methodology.md).

@@ -27,7 +27,7 @@ This skill assumes model hosting **already exists**. It does not provision GPUs 
 
 Ten steps. Steps 1 to 5 are wiring and each one ends in a proof; steps 6 to 10 produce a result. Do them in order: every step after the first depends on the one before it, and skipping a proof is what turns a twenty-minute setup into an afternoon.
 
-Tell the person the honest timeline up front, from measured runs ([docs/harness-omp-swe3.md](../../../docs/harness-omp-swe3.md)): one 21-task model takes **110 to 449 minutes** of wall clock depending on the model, plus roughly 50 minutes of judging. A single task is 5 to 21 minutes. So today produces one scored task and a working pipeline, and the frontier comes later.
+Tell the person the honest timeline up front, from measured runs: one 21-task model takes **110 to 449 minutes** of wall clock depending on the model, plus roughly 50 minutes of judging. A single task is 5 to 21 minutes. So today produces one scored task and a working pipeline, and the frontier comes later.
 
 ---
 
