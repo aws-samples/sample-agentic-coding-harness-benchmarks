@@ -100,5 +100,6 @@ artifact:
 
 Results are reported in a 5×6 matrix (rows = tasks, columns = models). Per-cell
 JSON with criterion breakdowns and judge notes lives at
-`{task}/{model}/judge-gpt.json`. The aggregated matrix + synthesis is in
-[`mcp-gateway-registry/JUDGE_RESULTS.md`](mcp-gateway-registry/JUDGE_RESULTS.md).
+`{task}/{model}/judge-gpt.json`. The aggregated matrix and synthesis are written
+to `{repo}/JUDGE_RESULTS.md` once a run has been scored; this directory ships
+empty, so that file appears after your first scored run.

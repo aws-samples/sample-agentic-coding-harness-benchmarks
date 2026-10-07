@@ -403,7 +403,7 @@ Open the generated `benchmark-output/dashboard.html` in any browser. It reads th
 
 The defaults in `vllm-serve.sh` are chosen for a throughput benchmark on 4×L40S. Here is what each knob does and what vLLM actually reports at boot on this node.
 
-> **Running notes worth reading before you tune anything:** [serving-optimization-notes.md](../../docs/serving-optimization-notes.md) records the portable, common-sense serving defaults (and why we do NOT tune the prefill knobs per model), and [cost-per-task-methodology.md](../../docs/cost-per-task-methodology.md) explains how cost per token / per task is derived, the two cost lenses, and why agentic coding is prefill-bound and scales horizontally. See also the [agentic coding throughput comparison](../../docs/agentic-coding-throughput-comparison.md).
+> **Running notes worth reading before you tune anything:** [serving-optimization-notes.md](../../docs/serving-optimization-notes.md) records the portable, common-sense serving defaults (and why we do NOT tune the prefill knobs per model), and [cost-per-task-methodology.md](../../docs/cost-per-task-methodology.md) explains how cost per token / per task is derived, the two cost lenses, and why agentic coding is prefill-bound and scales horizontally. See also [gpu-selection-h200-vs-l40s.md](../../docs/gpu-selection-h200-vs-l40s.md) for how the instance families compare on throughput per dollar.
 
 ### Which kernels are we using?
 

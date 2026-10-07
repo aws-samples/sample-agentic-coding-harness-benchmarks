@@ -64,7 +64,7 @@ The model thinks by default and there is no `minicpm5` reasoning parser in vLLM.
 Two things to know about the field and the volume:
 
 - **vLLM 0.29 names the field `reasoning`, not `reasoning_content`.** Reading the wrong key returns an empty string and looks exactly like a parser that is not working.
-- **A 2.5B model thinks at a length that belongs to a much larger one.** On a two-step arithmetic word problem it spent 899 reasoning tokens and hit `finish_reason: "length"` at a 900-token cap without ever reaching an answer. The harness default of `max_output_tokens: 16000` ([runner.yaml](../../../benchmarks/config/runner.yaml)) leaves ample room, but any caller that caps output in the hundreds will get empty `content` back and read it as a broken model.
+- **A 2.5B model thinks at a length that belongs to a much larger one.** On a two-step arithmetic word problem it spent 899 reasoning tokens and hit `finish_reason: "length"` at a 900-token cap without ever reaching an answer. The harness default of `max_output_tokens: 16000` ([runner.example.yaml](../../../benchmarks/config/runner.example.yaml)) leaves ample room, but any caller that caps output in the hundreds will get empty `content` back and read it as a broken model.
 
 ## Measured on 1x L40S (g6e.4xlarge)
 
