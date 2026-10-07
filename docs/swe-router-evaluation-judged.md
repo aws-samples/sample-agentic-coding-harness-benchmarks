@@ -9,7 +9,7 @@
 Replays the `swe-router` skill over all 21 tasks of `mcp-gateway-registry-v2`, then looks up what the model it picked ACTUALLY scored and cost on that task, against running the Closed frontier (gen 3) model on everything.
 
 - **Sampling.** Leave-one-out: each task routes from tier means recomputed with that task excluded, so no pick knows the run it is scored against.
-- **Floor.** Judged per task by omp running the skill's step 1 against the cloned repo, driven by the same Closed frontier (gen 3) model used as the baseline -- the real judgment the skill asks for, not a policy constant. See [swe-router-judged-inputs.md](swe-router-judged-inputs.md).
+- **Floor.** Judged per task by omp running the skill's step 1 against the cloned repo, driven by the same Closed frontier (gen 3) model used as the baseline -- the real judgment the skill asks for, not a policy constant. The floor and tier each task was judged to need are in the table below.
 - **Tier.** Classified per task by the same judged run, NOT read from the dataset. Each row carries the dataset's own `complexity` label beside it so disagreement is visible.
 - **Candidates.** 18 models the developer could select, with the organisational allow-list ignored (`--no-allow-list`). The full candidate set, with the measured score and cost behind each one, is the committed [`vend/swe-router/models.json`](../vend/swe-router/models.json).
 - **Cost basis.** Metered provider bills for Bedrock models; hardware-derived ($/token from the throughput sweep x tokens the server processed) for self-hosted ones. Mixing the two on one axis is directional -- see [cost-per-task-methodology.md](cost-per-task-methodology.md).

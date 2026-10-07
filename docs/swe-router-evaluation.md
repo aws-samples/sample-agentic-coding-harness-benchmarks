@@ -19,7 +19,7 @@ Three caveats decide how much to trust that, and all three come from the judgmen
 - **The tier classifier is right about 76% of the time**, matching the dataset's own complexity label on 16 of 21 -- and every miss rated the task *harder* than it was.
 - **Some floors are unreachable.** The skill never checks that a model exists which can clear the floor it just set. At the floors this run produced, nothing measured scores 80 on the hard tier, so the closed frontier model itself falls short on 4 tasks.
 
-Read the full working: **[what the model judged each task to need](swe-router-judged-inputs.md)** (floor, tier and reasoning per task, with the spread across repeats) and **[the routing result joined to the measured runs](swe-router-evaluation-judged.md)** (per-task picks, costs and score deltas). A script writes both -- see [Reproducing the routing evaluation](../benchmarks/README.md#reproducing-the-routing-evaluation).
+Read the full working in **[the routing result joined to the measured runs](swe-router-evaluation-judged.md)**: the per-task picks, costs and score deltas, with the floor and tier the model judged for each task. A script writes it -- see [Reproducing the routing evaluation](../benchmarks/README.md#reproducing-the-routing-evaluation).
 
 One thing is still a person's job: `swe-router` recommends, and the developer switches. [docs/vision.md](vision.md) describes the step past that, a harness that changes model on its own.
 
