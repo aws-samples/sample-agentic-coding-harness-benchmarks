@@ -50,4 +50,8 @@ See the [harness reference](harness-reference.md#common-invocations) for the ful
 
 ## Supported models
 
-`provider: bedrock` works for `us.anthropic.claude-*` (Anthropic) and `openai.gpt-*` (OpenAI GPT) models. Both speak Bedrock's native route directly. Pointing `--provider bedrock` at other non-Anthropic Bedrock models (Moonshot/Kimi, Meta Llama, Mistral, etc.) fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`. To benchmark those models, front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).
+With the default `--agent claude`, `provider: bedrock` works **only** for `us.anthropic.claude-*` models. Claude Code speaks the Anthropic Messages API, and this path sends that straight to Bedrock's Anthropic route -- so pointing it at a non-Anthropic model fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`.
+
+**Exception: `--agent codex`** speaks Bedrock Runtime directly (via its native `amazon-bedrock` provider), so it can also drive `openai.gpt-*` models on `--provider bedrock`. The orchestrator enforces this: a GPT model with any agent other than codex is rejected.
+
+For all other non-Anthropic Bedrock models (Moonshot/Kimi, Meta Llama, Mistral, etc.), front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).
