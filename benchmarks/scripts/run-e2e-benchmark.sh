@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Three inputs (flags or positional):
 #   --provider   bedrock | litellm | vllm
-#                  bedrock  = Anthropic models on Bedrock (provider=bedrock)
+#                  bedrock  = Anthropic + OpenAI (GPT) models on Bedrock (provider=bedrock)
 #                  litellm  = open-weight models on Bedrock via the LiteLLM
 #                             mantle proxy (provider=endpoint at the proxy)
 #                  vllm     = self-hosted model on a local vLLM server
@@ -252,14 +252,14 @@ warn "EXPECTATION: 'claude' and 'codex' on this machine are assumed to be wired 
 # Per-path readiness.
 case "$PROVIDER" in
     bedrock)
-        info "Path: Anthropic models directly on Amazon Bedrock (provider=bedrock)."
+        info "Path: Anthropic + OpenAI (GPT) models directly on Amazon Bedrock (provider=bedrock)."
         command -v aws >/dev/null 2>&1 || die "aws CLI not found; needed for Bedrock credentials."
         aws sts get-caller-identity >/dev/null 2>&1 \
             || die "AWS credentials not usable (aws sts get-caller-identity failed). Configure creds for region $AWS_REGION_ARG."
         ok "AWS credentials OK (region $AWS_REGION_ARG)"
         case "$MODEL" in
-            *anthropic*|*claude*) ;;
-            *) warn "provider=bedrock is Anthropic-only; '$MODEL' does not look like an Anthropic id. Non-Anthropic Bedrock models need --provider litellm." ;;
+            *anthropic*|*claude*|openai.gpt*) ;;
+            *) warn "provider=bedrock supports Anthropic and OpenAI (GPT) models; '$MODEL' does not look like one. Other non-Anthropic Bedrock models need --provider litellm." ;;
         esac
         ;;
     litellm)

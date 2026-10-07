@@ -19,8 +19,8 @@ set -euo pipefail
 # aws-bedrock-token-generator, injected as MANTLE_API_KEY at proxy startup.
 # Clients send a throwaway key; the proxy holds the real one.
 #
-# Anthropic (Claude) models do NOT need this -- run them with `--provider
-# bedrock` directly.
+# Anthropic (Claude) and OpenAI (GPT) models do NOT need this -- run them
+# with `--provider bedrock` directly.
 #
 # Usage:
 #   ./scripts/bedrock-mantle-proxy.sh            # install deps, mint token, start on :4000

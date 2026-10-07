@@ -48,6 +48,6 @@ uv run scripts/run-swe-headless.py --config config/runner.yaml \
 
 See the [harness reference](harness-reference.md#common-invocations) for the full set of `--count`, `--tasks`, `--concurrency`, `--stream`, and `--verbose` options, which behave the same on every path.
 
-## Anthropic-only
+## Supported models
 
-`provider: bedrock` works **only** for `us.anthropic.claude-*` models. `claude -p` always speaks the Anthropic Messages API, and this path sends that straight to Bedrock's Anthropic route -- so pointing `--provider bedrock` at a non-Anthropic Bedrock model (Moonshot/Kimi, Meta Llama, Mistral, etc.) fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`. To benchmark those models, front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).
+`provider: bedrock` works for `us.anthropic.claude-*` (Anthropic) and `openai.gpt-*` (OpenAI GPT) models. Both speak Bedrock's native route directly. Pointing `--provider bedrock` at other non-Anthropic Bedrock models (Moonshot/Kimi, Meta Llama, Mistral, etc.) fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`. To benchmark those models, front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).
