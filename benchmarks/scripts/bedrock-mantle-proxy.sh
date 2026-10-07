@@ -20,7 +20,8 @@ set -euo pipefail
 # Clients send a throwaway key; the proxy holds the real one.
 #
 # Anthropic (Claude) models do NOT need this -- run them with `--provider
-# bedrock` directly.
+# bedrock` directly. OpenAI (GPT) models also bypass this when run with
+# `--agent codex`, which speaks Bedrock Runtime natively.
 #
 # Usage:
 #   ./scripts/bedrock-mantle-proxy.sh            # install deps, mint token, start on :4000

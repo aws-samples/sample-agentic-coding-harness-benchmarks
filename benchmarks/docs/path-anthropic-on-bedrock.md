@@ -48,6 +48,10 @@ uv run scripts/run-swe-headless.py --config config/runner.yaml \
 
 See the [harness reference](harness-reference.md#common-invocations) for the full set of `--count`, `--tasks`, `--concurrency`, `--stream`, and `--verbose` options, which behave the same on every path.
 
-## Anthropic-only
+## Supported models
 
-`provider: bedrock` works **only** for `us.anthropic.claude-*` models. `claude -p` always speaks the Anthropic Messages API, and this path sends that straight to Bedrock's Anthropic route -- so pointing `--provider bedrock` at a non-Anthropic Bedrock model (Moonshot/Kimi, Meta Llama, Mistral, etc.) fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`. To benchmark those models, front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).
+With the default `--agent claude`, `provider: bedrock` works **only** for `us.anthropic.claude-*` models. Claude Code speaks the Anthropic Messages API, and this path sends that straight to Bedrock's Anthropic route -- so pointing it at a non-Anthropic model fails fast, e.g. `400 Request metadata contains a value that violates the regular expression`.
+
+**Exception: `--agent codex`** speaks Bedrock Runtime directly (via its native `amazon-bedrock` provider), so it can also drive `openai.gpt-*` models on `--provider bedrock`. The orchestrator enforces this: a GPT model with any agent other than codex is rejected.
+
+For all other non-Anthropic Bedrock models (Moonshot/Kimi, Meta Llama, Mistral, etc.), front Bedrock with a LiteLLM proxy: see [Path 2 - open-weight models on Amazon Bedrock via a LiteLLM proxy](path-open-weight-on-bedrock-litellm.md).

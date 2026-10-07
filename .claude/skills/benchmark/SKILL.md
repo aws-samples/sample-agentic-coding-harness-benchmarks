@@ -18,7 +18,7 @@ All the real logic lives in the shell script and its Python helpers ([`preflight
 Collect these three, in order. Do not guess -- ask if any is missing.
 
 1. **provider** -- one of:
-   - `bedrock` -- Anthropic models (Claude Opus/Sonnet/Haiku) directly on Amazon Bedrock.
+   - `bedrock` -- Anthropic models (Claude Opus/Sonnet/Haiku) directly on Amazon Bedrock; also OpenAI (GPT) models with `--agent codex`.
    - `litellm` -- open-weight models on Amazon Bedrock through the LiteLLM mantle proxy (Kimi, Qwen, DeepSeek, Mistral, ...).
    - `vllm` -- a model you self-host on a local vLLM server (`127.0.0.1:8000`).
 2. **model** -- the model id / served-model-name. Examples: `us.anthropic.claude-opus-4-8` (bedrock), `moonshotai.kimi-k2-thinking` (litellm), `qwen3-coder-30b` (vllm).
@@ -275,6 +275,6 @@ The `run-summary.json` carries the structured data (per-task scores/turns/cost, 
 ## Notes
 
 - **This skill manages the vLLM server and the DuckDB collector for the `vllm` path** (Step 2 brings the server up on the requested model, stopping any other model first; Step 5 stops the collector and archives its snapshot). It does **not** manage the LiteLLM proxy -- that is a long-lived service with its own script (`bedrock-mantle-proxy.sh`); the skill only checks it is up.
-- **provider = bedrock is Anthropic-only.** For non-Anthropic Bedrock models use `litellm`. The orchestrator warns if a non-Anthropic id is passed with `bedrock`.
+- **provider = bedrock is Anthropic-only for `--agent claude`**; OpenAI (GPT) models work with `--agent codex` (which speaks Bedrock Runtime directly). For other non-Anthropic Bedrock models use `litellm`. The orchestrator rejects GPT models without `--agent codex` and warns on unrecognized ids.
 - **The model slug is not always the model id.** For a Bedrock inference profile the folder name drops the `us.anthropic.` prefix and any `[...]` suffix (e.g. `us.anthropic.claude-opus-4-8` -> `claude-opus-4-8`); a served name like `qwen3-coder-30b` is unchanged. The pre-flight helper and the orchestrator both compute this the same way the harness does.
 - Every script takes `--help`.
