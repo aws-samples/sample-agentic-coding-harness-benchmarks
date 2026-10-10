@@ -84,7 +84,7 @@ uv run scripts/run-swe-router-headless.py --agent omp --provider bedrock \
     --model us.anthropic.claude-opus-5 --aws-region us-east-1 --repeats 3
 ```
 
-`--repeats` runs the whole pass N times and records every judgment. A floor is a judgment call, and it moves: on the published run three identical passes agreed on only 14 of 21 tasks. The consolidated tuple is the median floor and modal tier. The output records the spread per task. Cost is roughly $0.55 and a minute per judgment. Writes [docs/metrics/swe-router-judged-inputs-omp.json](../docs/metrics/swe-router-judged-inputs-omp.json) and its markdown; `--render <json>` regenerates the markdown alone.
+`--repeats` runs the whole pass N times and records every judgment. A floor is a judgment call, and it moves: on the published run three identical passes agreed on only 14 of 21 tasks. The consolidated tuple is the median floor and modal tier. The output records the spread per task. Cost is roughly $0.55 and a minute per judgment. Writes `docs/metrics/swe-router-judged-inputs-omp.json` and its markdown; `--render <json>` regenerates the markdown alone.
 
 **2. Route on them and join to the measured runs.** For each task, run `route.py` with that tuple, then look up what the recommended model actually scored and cost on that task, against a fixed-model baseline.
 
