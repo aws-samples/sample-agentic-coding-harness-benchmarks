@@ -27,35 +27,41 @@
 # ---------------------------------------------------------------------------
 # What ships here, and why you should change it
 # ---------------------------------------------------------------------------
-# These six are the models on the measured cost/quality frontier: nothing
+# These five are the models on the measured cost/quality frontier: nothing
 # else scores at least as well for at most the cost, across the whole
 # 21-task benchmark. That is a defensible starting point and a poor
 # finished one, for two reasons.
 #
-# Five of the six are self-hosted, and the shipped file cannot know whether
-# you serve them. If you do not, delete those four lines -- left in, they
+# One of the five, qwen3.8-27b, is self-hosted, and the shipped file cannot
+# know whether you serve it. If you do not, delete that line -- left in, it
 # will be recommended, and a developer on a hosted API will be told to
-# switch to a model they cannot select. With only claude-opus-5 left they
-# would be sent there for everything, including a docs page, so add the
-# hosted models they do have.
+# switch to a model they cannot select. The other four run on Amazon
+# Bedrock.
 #
 # Frontier membership also comes from whole-dataset means, which is not the
-# ranking that decides a task. claude-sonnet-5 is missing because
-# qwen3.8-27b beats it on average -- 78.48 to 76.97, at a third of the
-# cost. On high-complexity work that reverses: sonnet scores 73.68 having
-# finished all five hard tasks, qwen3.8-27b scores 71.45 having failed one.
+# ranking that decides a task. kimi-k3 is missing because claude-sonnet-5-5
+# beats it on average -- 79.49 to 79.17, at three fifths of the cost -- yet
+# kimi-k3 scores higher on trivial work (81.80 to 77.36). And the two
+# cheapest entries fall away on hard work: qwen3.8-27b drops to 71.45 and
+# claude-haiku-5-5 to 60.00 on high-complexity tasks, and each failed one
+# of the five.
 #
-# So add the models your developers can actually reach. Uncomment these two
-# if they are on a hosted API:
+# So add the models your developers can actually reach. If you self-host,
+# these were on the frontier before the Claude 5.5 runs and remain the best
+# self-hosted value:
 #
-#   claude-sonnet-5     # 76.97, $4.67/task. Beats qwen3.8-27b on hard work.
-#   claude-haiku-4-5    # 56.18, $0.76/task. Cheapest hosted option.
+#   kimi-k3             # 79.17, $4.33/task, self-hosted.
+#   gemma-4-31b         # 59.74, $0.87/task, self-hosted.
+#   qwen3.6-35b         # 59.24, $0.26/task, self-hosted. Cheapest self-hosted.
 
 claude-opus-5           # 82.83, $11.95/task, Bedrock. Highest scoring measured.
-glm-5.3                 # 80.11, $7.04/task, self-hosted. Within 2.7 of the top.
-kimi-k3                 # 79.17, $4.33/task, self-hosted. New frontier point.
-qwen3.8-27b             # 78.48, $1.47/task, self-hosted. Best value here, but
-                        # drops to 71.45 on high-complexity work and did not
+claude-opus-5-5         # 81.16, $4.44/task, Bedrock. Within 1.7 of the top at
+                        # under two fifths of the price.
+claude-sonnet-5-5       # 79.49, $2.62/task, Bedrock. Highest on medium work
+                        # (82.90) and finished all five hard tasks.
+qwen3.8-27b             # 78.48, $1.47/task, self-hosted. Drops to 71.45 on
+                        # high-complexity work and did not finish one of the
+                        # five hard tasks.
+claude-haiku-5-5        # 72.69, $0.14/task, Bedrock. Cheapest measured by far,
+                        # but 60.00 on high-complexity work, where it did not
                         # finish one of the five hard tasks.
-gemma-4-31b             # 59.74, $0.87/task, self-hosted.
-qwen3.6-35b             # 59.24, $0.26/task, self-hosted. Cheapest measured.

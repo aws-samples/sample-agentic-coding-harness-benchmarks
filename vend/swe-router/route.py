@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
-"""Pick a model, given a quality floor and a task difficulty tier.
+"""Pick a model for a coding task from six rubric scores.
 
-The skill decides two things by reading the repo: how good the output has to be
-(the floor) and how hard the task is (the tier). This does the rest, so the
-selection is arithmetic rather than something a language model works out in
-prose and might get wrong.
+The skill reads the repository and the task and scores the six questions in
+``rubric.md``, 0 to 2 each. This does the rest, so the selection is arithmetic
+rather than something a language model works out in prose and might get wrong:
 
-    python3 route.py --floor 70 --tier high
+    python3 route.py --rubric '{"hidden_contract": 1, "silent_invariant": 0,
+        "coordinated_surfaces": 2, "ambiguity": 1, "verification": 1,
+        "blast_radius": 1}' --confidence high
 
 It prints JSON: the recommendation, the runners-up, and why anything was
 excluded. Standard library only, so it runs wherever the skill is installed.
 
 The rule, in full:
 
-1. Start from every model in ``models.json``.
-2. Drop anything the organisation does not allow, if ``allowed-models.txt`` is
-   present beside this file, at the repository root, or in ``.claude/``. That
-   file is also the availability list: whoever maintains it is saying every
-   entry is a model the developer's agent can select.
-3. Drop anything ``--available`` leaves out, if it was given. It rarely is --
-   it exists for the case where a developer says one listed model is not
-   wired up for them.
-4. Read each survivor's score at the task's tier -- not its overall mean, which
-   is a ranking that holds at no tier.
-5. Keep the ones at or above the floor and take the cheapest. Models within
-   ``--tie-band`` points of each other are treated as equal, because with five
-   or six tasks per tier a smaller gap does not survive dropping one task.
+1. Turn the scores into two numbers with ``routing-policy.json``. Four
+   difficulty scores add up to a **bucket** (the task's difficulty level:
+   easy, moderate, hard, very hard). ``blast_radius`` and ``verification`` set
+   the **required quality**, the score a model must reach.
+2. If the scorer reported low confidence, stop and keep the developer on the
+   model they have.
+3. Start from every model in ``models.json``. Drop anything the organisation
+   does not allow, if ``allowed-models.txt`` is present beside this file, at
+   the repository root, or in ``.claude/``. That file is also the availability
+   list: whoever maintains it is saying every entry is a model the developer's
+   agent can select. ``--available`` narrows it further, rarely.
+4. Read each survivor's score in the task's bucket -- not its overall mean.
+   A model with no benchmark task in that bucket is read from the next harder
+   bucket it has, which can only understate it.
+5. Skip a model that failed more of that bucket's benchmark tasks than the
+   policy's ``min_completion_in_bucket`` allows. A column mean leaves failures
+   out, so this is the only place they count.
+6. Keep the ones at or above the required quality and take the cheapest.
+   Models within the tie band of each other are treated as equal, because with
+   a handful of tasks per bucket a smaller gap does not survive dropping one.
+
+``--tier`` and ``--floor`` still work, reading the old per-tier columns, for
+one release.
 """
 
 from __future__ import annotations
@@ -37,6 +48,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Fail with a message the skill can read out, not a traceback, on a Python too
+# old for this file. The installer checks the same floor.
+if sys.version_info < (3, 8):  # pragma: no cover - depends on the interpreter
+    print('{"status": "error", "error": "route.py needs Python 3.8 or later"}')
+    sys.exit(2)
+
 _HERE = Path(__file__).resolve().parent
 
 # Five or six tasks per tier, one run each. Dropping a single task reverses the
@@ -46,6 +63,21 @@ _HERE = Path(__file__).resolve().parent
 DEFAULT_TIE_BAND = 3.0
 
 TIERS = ("trivial", "low", "medium", "high")
+
+# The rubric. Kept in step with rubric.md, which the skill's model reads.
+DIMENSIONS = (
+    "hidden_contract",
+    "silent_invariant",
+    "coordinated_surfaces",
+    "ambiguity",
+    "verification",
+    "blast_radius",
+)
+SCORES = (0, 1, 2)
+BUCKETS = ("easy", "moderate", "hard", "very_hard")
+CONFIDENCE_LEVELS = ("high", "medium", "low")
+DEFAULT_POLICY = _HERE / "routing-policy.json"
+SCHEMA_MAJORS = ("1", "2")
 
 # Where an organisation's allow-list might sit, nearest the developer first: a
 # team overriding the shipped default is the point of having one.
@@ -98,12 +130,123 @@ def load_models(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RouteError(f"{path} is not valid JSON: {exc}") from exc
     major = str(data.get("schema_version", "")).split(".", 1)[0]
-    if major != "1":
+    if major not in SCHEMA_MAJORS:
         raise RouteError(
             f"models.json is schema {data.get('schema_version')}; this router "
-            "understands major version 1. Update the router."
+            f"understands major versions {', '.join(SCHEMA_MAJORS)}. Update the router."
         )
     return data
+
+
+def load_policy(path: Path) -> dict[str, Any]:
+    """Load and check the routing policy.
+
+    Args:
+        path: Path to routing-policy.json.
+
+    Returns:
+        The parsed policy.
+
+    Raises:
+        RouteError: If the file is missing, unparseable, or does not define a
+            quality for every blast radius and a range for every bucket.
+    """
+    if not path.is_file():
+        raise RouteError(f"no routing policy at {path}")
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RouteError(f"{path} is not valid JSON: {exc}") from exc
+    try:
+        by_radius = policy["required_quality"]["by_blast_radius"]
+        dims = policy["difficulty"]["dimensions"]
+        buckets = policy["difficulty"]["buckets"]
+    except (KeyError, TypeError) as exc:
+        raise RouteError(f"{path} is missing {exc}") from exc
+    if sorted(by_radius) != [str(v) for v in SCORES]:
+        raise RouteError(f"{path}: by_blast_radius must define 0, 1 and 2")
+    if not set(dims) <= set(DIMENSIONS):
+        raise RouteError(f"{path}: unknown difficulty dimension in {dims}")
+    if list(buckets) != list(BUCKETS):
+        raise RouteError(f"{path}: buckets must be {', '.join(BUCKETS)}, in order")
+    # A platform team edits this file by hand, so check the shapes the
+    # arithmetic relies on and say which entry is wrong.
+    for name, edges in buckets.items():
+        if not (
+            isinstance(edges, list)
+            and len(edges) == 2
+            and all(isinstance(e, int) and not isinstance(e, bool) for e in edges)
+        ):
+            raise RouteError(f"{path}: bucket {name} must be [low, high] integers")
+    numbers = [
+        *by_radius.values(),
+        policy["required_quality"].get("add_when_verification_is_2", 0),
+    ]
+    if not all(
+        isinstance(n, (int, float)) and not isinstance(n, bool) for n in numbers
+    ):
+        raise RouteError(f"{path}: required quality values must be numbers")
+    return policy
+
+
+def parse_rubric(text: str) -> dict[str, int]:
+    """Read the six rubric scores from JSON.
+
+    Accepts ``{"hidden_contract": 1, ...}``, the same with each value as
+    ``{"score": 1, "evidence": "..."}``, or either wrapped in ``{"scores": ...}``.
+
+    Args:
+        text: The JSON the skill passed.
+
+    Returns:
+        Dimension -> score.
+
+    Raises:
+        RouteError: Unless all six dimensions are present, each 0, 1 or 2.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RouteError(f"--rubric is not valid JSON: {exc}") from exc
+    if isinstance(data, dict) and isinstance(data.get("scores"), dict):
+        data = data["scores"]
+    if not isinstance(data, dict) or set(data) != set(DIMENSIONS):
+        raise RouteError(f"--rubric must score exactly: {', '.join(DIMENSIONS)}")
+    scores = {}
+    for dim in DIMENSIONS:
+        value = data[dim]
+        if isinstance(value, dict):
+            value = value.get("score")
+        if isinstance(value, bool) or value not in SCORES:
+            raise RouteError(f"--rubric {dim} must be 0, 1 or 2, got {value!r}")
+        scores[dim] = int(value)
+    return scores
+
+
+def required_quality(scores: dict[str, int], policy: dict[str, Any]) -> float:
+    """The score a model must reach: blast radius, plus a margin when untested."""
+    rq = policy["required_quality"]
+    base = float(rq["by_blast_radius"][str(scores["blast_radius"])])
+    extra = float(rq.get("add_when_verification_is_2", 0))
+    return base + (extra if scores["verification"] == 2 else 0.0)
+
+
+def difficulty_sum(scores: dict[str, int], policy: dict[str, Any]) -> int:
+    """Sum of the policy's difficulty dimensions."""
+    return sum(scores[d] for d in policy["difficulty"]["dimensions"])
+
+
+def bucket_for(scores: dict[str, int], policy: dict[str, Any]) -> str:
+    """The task's difficulty level, from the policy's bucket ranges.
+
+    Raises:
+        RouteError: If the policy's ranges leave this sum uncovered.
+    """
+    total = difficulty_sum(scores, policy)
+    for name, (lo, hi) in policy["difficulty"]["buckets"].items():
+        if lo <= total <= hi:
+            return name
+    raise RouteError(f"difficulty sum {total} falls in no bucket of the policy")
 
 
 def build_alias_index(models: list[dict], aliases_path: Path) -> dict[str, str]:
@@ -187,39 +330,81 @@ def parse_allow_list(path: Path) -> list[str]:
     return names
 
 
+def _completion_rate(completion: str | None) -> float | None:
+    """``"9/10"`` -> 0.9; None when the count is missing or malformed."""
+    try:
+        done, total = (int(x) for x in (completion or "").split("/"))
+    except ValueError:
+        return None
+    return done / total if total else None
+
+
+def _score_at(
+    m: dict, level: str, columns: str, fallback: tuple[str, ...]
+) -> tuple[float | None, str | None]:
+    """A model's score at ``level``, else at the first ``fallback`` level it has.
+
+    Returns:
+        The score and the level it came from, or (None, None).
+    """
+    table = m.get(columns) or {}
+    for candidate in (level, *fallback):
+        if table.get(candidate) is not None:
+            return table[candidate], candidate
+    return None, None
+
+
 def select(
     models: list[dict],
     *,
     tier: str,
     floor: float,
     tie_band: float = DEFAULT_TIE_BAND,
+    columns: str = "score_by_complexity",
+    completions: str = "completion_by_complexity",
+    fallback: tuple[str, ...] = (),
+    min_completion: float = 0.0,
 ) -> dict[str, Any]:
     """Choose the cheapest candidate whose score at ``tier`` clears ``floor``.
 
     Args:
         models: Candidate model entries, already filtered.
-        tier: One of TIERS.
-        floor: Minimum acceptable score at that tier.
+        tier: The column to read: a difficulty bucket, or a legacy tier.
+        floor: Minimum acceptable score there (the required quality).
         tie_band: Score difference treated as no difference.
+        columns: The models.json field holding per-level scores.
+        completions: The models.json field holding per-level completion.
+        fallback: Levels to read, in order, when a model has no score at
+            ``tier``. The rubric path passes the harder buckets.
+        min_completion: Skip a model that finished less than this share of the
+            benchmark tasks at the level its score came from.
 
     Returns:
-        A dict with the pick, the models that cleared the floor, and those that
-        did not.
+        A dict with the pick, the models that cleared the floor, those that
+        did not, and those skipped for failing tasks.
     """
-    scored, unscored = [], []
+    scored, unscored, borrowed, incomplete = [], [], {}, []
     for m in models:
-        score = (m.get("score_by_complexity") or {}).get(tier)
+        score, level = _score_at(m, tier, columns, fallback)
         if score is None:
-            # No measurement at this tier; fall back to the overall mean and
+            # No measurement at this level; fall back to the overall mean and
             # record that, rather than dropping the model without saying so.
-            score = m.get("score")
+            score, level = m.get("score"), None
             if score is None:
                 continue
             unscored.append(m["model"])
-        scored.append((score, m))
+        elif level != tier:
+            borrowed[m["model"]] = level
+        rate = _completion_rate((m.get(completions) or {}).get(level or tier))
+        if rate is not None and rate < min_completion:
+            incomplete.append((score, m, level))
+            continue
+        scored.append((score, m, level))
 
-    clears = [(s, m) for s, m in scored if s >= floor]
-    misses = sorted(((s, m) for s, m in scored if s < floor), key=lambda x: -x[0])
+    clears = [(s, m, lv) for s, m, lv in scored if s >= floor]
+    misses = sorted(
+        ((s, m, lv) for s, m, lv in scored if s < floor), key=lambda x: -x[0]
+    )
 
     pick = None
     tied = []
@@ -229,26 +414,24 @@ def select(
         # prefer the higher score among those, since the cost is the same or
         # better and the score difference is not measurable either way.
         band = [
-            (s, m)
-            for s, m in clears
-            if m["cost_per_task_usd"] <= cheapest[1]["cost_per_task_usd"]
-            and abs(s - cheapest[0]) <= tie_band
+            e
+            for e in clears
+            if e[1]["cost_per_task_usd"] <= cheapest[1]["cost_per_task_usd"]
+            and abs(e[0] - cheapest[0]) <= tie_band
         ]
         pick = max(band, key=lambda x: x[0]) if band else cheapest
-        tied = [m["model"] for s, m in band if m["model"] != pick[1]["model"]]
+        tied = [e[1]["model"] for e in band if e[1]["model"] != pick[1]["model"]]
 
-    def row(entry: tuple[float, dict]) -> dict[str, Any]:
-        score, m = entry
-        completion = (m.get("completion_by_complexity") or {}).get(tier)
-        done, total = (
-            (completion.split("/") + [None])[:2] if completion else (None, None)
-        )
+    def row(entry: tuple[float, dict, str | None]) -> dict[str, Any]:
+        score, m, level = entry
+        completion = (m.get(completions) or {}).get(level or tier)
+        rate = _completion_rate(completion)
         return {
             "model": m["model"],
             "score": round(score, 2),
             "cost_per_task_usd": m["cost_per_task_usd"],
             "completion": completion,
-            "finished_every_task": completion is None or done == total,
+            "finished_every_task": rate is None or rate == 1.0,
             # How far above the floor, and whether that margin is bigger than
             # the noise. A model at 71 against a floor of 70 has not reliably
             # cleared it, and saying "clears the floor" flat would oversell it.
@@ -263,30 +446,108 @@ def select(
             row(e) for e in sorted(clears, key=lambda x: x[1]["cost_per_task_usd"])
         ],
         "below_floor": [row(e) for e in misses],
+        "skipped_for_failures": [row(e) for e in incomplete],
+        "scored_from_harder_bucket": borrowed,
         "scored_from_overall_mean": unscored,
+    }
+
+
+def _rubric_inputs(
+    rubric: dict[str, int], policy_path: Path
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Turn rubric scores into the bucket, required quality and policy knobs."""
+    policy = load_policy(policy_path)
+    return policy, {
+        "rubric": rubric,
+        "difficulty_sum": difficulty_sum(rubric, policy),
+        "bucket": bucket_for(rubric, policy),
+        "required_quality": required_quality(rubric, policy),
     }
 
 
 def route(
     *,
-    tier: str,
-    floor: float,
+    tier: str | None = None,
+    floor: float | None = None,
     available: list[str] | None,
     models_path: Path,
     aliases_path: Path,
     allowed_file: Path | None,
     no_allow_list: bool,
-    tie_band: float,
+    tie_band: float | None = None,
+    rubric: dict[str, int] | None = None,
+    confidence: str | None = None,
+    policy_path: Path = DEFAULT_POLICY,
+    min_completion: float | None = None,
 ) -> dict[str, Any]:
     """Run the whole selection and return a result the caller can print.
+
+    Give either ``rubric`` (the six scores; the policy sets the bucket and the
+    required quality) or the legacy ``tier`` and ``floor``.
+
+    Args:
+        tier: Legacy: one of TIERS.
+        floor: Legacy: the quality floor.
+        available: Models to narrow the candidate set to, or None.
+        models_path: models.json.
+        aliases_path: model-aliases.json.
+        allowed_file: Explicit allow-list path, or None to search.
+        no_allow_list: Ignore any allow-list.
+        tie_band: Points below which two models tie; None takes the policy's
+            value on the rubric path and DEFAULT_TIE_BAND otherwise.
+        rubric: The six rubric scores.
+        confidence: The scorer's confidence; "low" stops the routing when the
+            policy says to stay on the current model when unsure.
+        policy_path: routing-policy.json.
+        min_completion: Override the policy's ``min_completion_in_bucket``.
 
     Raises:
         RouteError: On unusable inputs.
     """
-    if tier not in TIERS:
-        raise RouteError(f"--tier must be one of {', '.join(TIERS)}, got {tier!r}")
+    head: dict[str, Any] = {}
+    select_args: dict[str, Any] = {}
+    if rubric is not None:
+        if confidence is not None and confidence not in CONFIDENCE_LEVELS:
+            raise RouteError(
+                f"--confidence must be one of {', '.join(CONFIDENCE_LEVELS)}"
+            )
+        policy, head = _rubric_inputs(rubric, policy_path)
+        tier, floor = head["bucket"], head["required_quality"]
+        if tie_band is None:
+            tie_band = float(policy.get("tie_band_points", DEFAULT_TIE_BAND))
+        if min_completion is None:
+            min_completion = float(policy.get("min_completion_in_bucket", 1.0))
+        select_args = {
+            "columns": "score_by_difficulty",
+            "completions": "completion_by_difficulty",
+            "fallback": BUCKETS[BUCKETS.index(tier) + 1 :],
+        }
+        head["confidence"] = confidence
+        if confidence == "low" and policy.get("when_unsure") == "stay_on_current_model":
+            return {
+                **head,
+                "status": "unsure",
+                "recommended": None,
+                "reason": "the rubric scores were marked low confidence, and the "
+                "policy keeps the developer on their current model when unsure",
+            }
+    else:
+        if tier not in TIERS:
+            raise RouteError(f"--tier must be one of {', '.join(TIERS)}, got {tier!r}")
+        if floor is None:
+            raise RouteError("--floor is required with --tier")
+        head = {"tier": tier}
+    tie_band = DEFAULT_TIE_BAND if tie_band is None else tie_band
+    select_args["min_completion"] = min_completion or 0.0
 
     data = load_models(models_path)
+    if rubric is not None and not any(
+        m.get("score_by_difficulty") for m in data["models"]
+    ):
+        raise RouteError(
+            f"{models_path} has no score_by_difficulty columns; the rubric needs "
+            "schema 2 or later. Update the skill."
+        )
     all_models = data["models"]
     index = build_alias_index(all_models, aliases_path)
 
@@ -320,7 +581,7 @@ def route(
         candidates = [m for m in candidates if m["model"] in have_set]
 
     result: dict[str, Any] = {
-        "tier": tier,
+        **head,
         "floor": floor,
         "tie_band": tie_band,
         "allow_list": str(allow_path) if allow_path else None,
@@ -335,16 +596,23 @@ def route(
         result["reason"] = _empty_reason(excluded, allow_path is not None, available)
         return result
 
-    result.update(select(candidates, tier=tier, floor=floor, tie_band=tie_band))
+    result.update(
+        select(candidates, tier=tier, floor=floor, tie_band=tie_band, **select_args)
+    )
     result["status"] = "ok" if result["recommended"] else "nothing_clears_floor"
     if result["status"] == "nothing_clears_floor":
         best = result["below_floor"][0] if result["below_floor"] else None
+        skipped = [r["model"] for r in result["skipped_for_failures"]]
         result["reason"] = (
             f"nothing available reaches {floor} on {tier} tasks; closest is "
             f"{best['model']} at {best['score']}, short by "
             f"{round(floor - best['score'], 2)}"
             if best
             else f"nothing available has a score for {tier} tasks"
+        ) + (
+            f"; skipped for failing {tier} tasks: {', '.join(skipped)}"
+            if skipped
+            else ""
         )
     # Sanity: the pick must not be beaten on both axes by another candidate.
     if result.get("recommended"):
@@ -395,10 +663,30 @@ def _empty_reason(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(
-        description="Pick a model given a quality floor and a difficulty tier.",
+        description="Pick a model for a coding task from six rubric scores.",
+        epilog=(
+            "Example:\n"
+            "  python3 route.py --confidence high --rubric "
+            '\'{"hidden_contract": 1, "silent_invariant": 0, '
+            '"coordinated_surfaces": 2, "ambiguity": 1, '
+            '"verification": 1, "blast_radius": 1}\'\n'
+            "Legacy, for one release:\n"
+            "  python3 route.py --tier high --floor 70"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--tier", required=True, choices=TIERS)
-    p.add_argument("--floor", required=True, type=float)
+    p.add_argument(
+        "--rubric",
+        help="The six rubric scores as JSON, each 0, 1 or 2. See rubric.md.",
+    )
+    p.add_argument(
+        "--confidence",
+        choices=CONFIDENCE_LEVELS,
+        help="How sure the scorer is. 'low' keeps the developer on their model.",
+    )
+    p.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    p.add_argument("--tier", choices=TIERS, help="Legacy: a difficulty tier.")
+    p.add_argument("--floor", type=float, help="Legacy: a quality floor.")
     p.add_argument(
         "--available",
         help="Comma-separated models to narrow the allow-list further. Omit "
@@ -411,10 +699,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Ignore any allow-list on disk.",
     )
-    p.add_argument("--tie-band", type=float, default=DEFAULT_TIE_BAND)
+    p.add_argument(
+        "--tie-band",
+        type=float,
+        default=None,
+        help="Points below which two models tie. Default: the policy's, or "
+        f"{DEFAULT_TIE_BAND} with --tier.",
+    )
     p.add_argument("--models", type=Path, default=_HERE / "models.json")
     p.add_argument("--aliases", type=Path, default=_HERE / "model-aliases.json")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.rubric is None and (args.tier is None or args.floor is None):
+        p.error("give --rubric, or the legacy --tier and --floor")
+    if args.rubric is not None and (args.tier is not None or args.floor is not None):
+        p.error("--rubric sets the bucket and required quality; drop --tier/--floor")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -424,6 +723,9 @@ def main(argv: list[str] | None = None) -> int:
         result = route(
             tier=args.tier,
             floor=args.floor,
+            rubric=parse_rubric(args.rubric) if args.rubric is not None else None,
+            confidence=args.confidence,
+            policy_path=args.policy,
             available=(
                 [s.strip() for s in args.available.split(",") if s.strip()]
                 if args.available

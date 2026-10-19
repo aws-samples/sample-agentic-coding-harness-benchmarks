@@ -52,7 +52,7 @@ One command per model. The `/benchmark` skill runs the pre-flight checks, the ha
 
 ## Step 2 — Developers install the skill
 
-Five files copied into a skills directory. The skill imports nothing and needs no build step. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
+Seven files copied into a skills directory. The skill needs `python3` 3.8 or later on PATH, with no packages and no build step; the installer refuses to run without it. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash
@@ -64,9 +64,9 @@ To install it once for every repository instead, send it to your home directory:
 curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash -s -- --dir ~/.claude/skills
 ```
 
-Re-run either command to upgrade; your edited `allowed-models.txt` is kept.
+Re-run either command to upgrade; your edited `allowed-models.txt` and `routing-policy.json` are kept.
 
-`swe-router` engages on its own before a substantial task. It sets a quality floor from what happens if the change is wrong, classifies how hard the task is, and takes the cheapest model that clears that floor at that tier. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
+`swe-router` engages on its own before a substantial task. Your assistant's model answers six rubric questions about the task: four set its difficulty bucket (easy, moderate, hard or very hard), and two set the quality a model must reach, from what happens if the change is wrong. The skill then takes the cheapest permitted model whose benchmark score in that bucket clears the bar, skipping any model that failed a benchmark task there. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
 
 Install notes, the file-by-file breakdown and the measured results: **[vend/swe-router/README.md](vend/swe-router/README.md)**.
 

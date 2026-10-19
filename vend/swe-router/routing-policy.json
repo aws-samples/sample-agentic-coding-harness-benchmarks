@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.1",
+  "required_quality": {
+    "by_blast_radius": {
+      "0": 60,
+      "1": 70,
+      "2": 75
+    },
+    "add_when_verification_is_2": 5,
+    "meaning": {
+      "60": "Bottom of the judge's 'strong' band: a usable foundation; expect review to fix real gaps.",
+      "65": "Low 'strong': implementation-ready in parts; review will find gaps.",
+      "70": "Middle of 'strong': implementation-ready in most respects with limited gaps.",
+      "75": "Top of 'strong': few gaps and well-grounded; for security, money or data paths.",
+      "80": "Approaching the judge's 'excellent' band: comprehensive and precise."
+    }
+  },
+  "difficulty": {
+    "dimensions": [
+      "hidden_contract",
+      "silent_invariant",
+      "coordinated_surfaces",
+      "ambiguity"
+    ],
+    "bucketing": "absolute",
+    "buckets": {
+      "easy": [
+        0,
+        1
+      ],
+      "moderate": [
+        2,
+        3
+      ],
+      "hard": [
+        4,
+        5
+      ],
+      "very_hard": [
+        6,
+        8
+      ]
+    }
+  },
+  "tie_band_points": 3,
+  "min_completion_in_bucket": 1.0,
+  "min_completion_in_bucket_meaning": "Skip a model that finished fewer than this share of the benchmark tasks in the task's bucket. A column mean leaves failed tasks out, so without this a model that failed 1 of 10 hard tasks looks as good as one that finished all 10. 1.0 skips any model with a failure in the bucket.",
+  "when_unsure": "stay_on_current_model"
+}

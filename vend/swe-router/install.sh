@@ -24,11 +24,12 @@ SKILLS_DIR="${SWE_ROUTER_DIR:-.claude/skills}"
 FORCE="${SWE_ROUTER_FORCE:-0}"
 
 SKILL_NAME="swe-router"
-SKILL_FILES="SKILL.md route.py models.json model-aliases.json allowed-models.txt"
-JSON_FILES="models.json model-aliases.json"
-# The one file a user is expected to edit. An upgrade preserves it, because
-# overwriting it would silently replace an organisation's model policy.
-POLICY_FILE="allowed-models.txt"
+SKILL_FILES="SKILL.md rubric.md route.py models.json model-aliases.json routing-policy.json allowed-models.txt"
+JSON_FILES="models.json model-aliases.json routing-policy.json"
+# The files a user is expected to edit. An upgrade preserves them, because
+# overwriting either would silently replace an organisation's policy: which
+# models it allows, and what quality each kind of task must reach.
+POLICY_FILES="allowed-models.txt routing-policy.json"
 
 
 usage() {
@@ -42,9 +43,9 @@ Options:
                 to hold a version steady.
   --repo OWNER/NAME
                 Source repository (default: aws-samples/sample-agentic-coding-harness-benchmarks).
-  --force       Overwrite an existing allowed-models.txt. Without this, an
-                existing model policy is kept and the rest of the skill is
-                still upgraded.
+  --force       Overwrite an existing allowed-models.txt and routing-policy.json.
+                Without this, existing policy files are kept and the rest of
+                the skill is still upgraded.
   -h, --help    Show this help.
 
 Environment variables: SWE_ROUTER_DIR, SWE_ROUTER_REF, SWE_ROUTER_REPO,
@@ -79,6 +80,21 @@ done
 
 if ! command -v curl >/dev/null 2>&1; then
     echo "install.sh: curl is required but was not found on PATH." >&2
+    exit 1
+fi
+
+# The skill runs route.py, which needs only the Python standard library but
+# does need python3, 3.8 or later, on PATH. Without it the skill cannot
+# recommend anything, so refuse to install rather than leave a skill that
+# fails the first time it fires. Nothing has been downloaded yet.
+if ! command -v python3 >/dev/null 2>&1 \
+        || ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+    echo "install.sh: swe-router needs python3 (3.8 or later) on PATH, and none was found." >&2
+    echo "It needs no Python packages, only the interpreter. Install one, then re-run:" >&2
+    echo "  macOS:          xcode-select --install" >&2
+    echo "  Debian/Ubuntu:  sudo apt install python3" >&2
+    echo "  Windows:        use WSL, or install from python.org" >&2
+    echo "Nothing was written." >&2
     exit 1
 fi
 
@@ -121,25 +137,35 @@ fi
 
 mkdir -p "$TARGET"
 
-kept_policy=0
+kept=""
 for f in $SKILL_FILES; do
-    if [ "$f" = "$POLICY_FILE" ] && [ -f "${TARGET}/${f}" ] && [ "$FORCE" != "1" ]; then
-        kept_policy=1
-        continue
-    fi
+    case " $POLICY_FILES " in
+        *" $f "*)
+            if [ -f "${TARGET}/${f}" ] && [ "$FORCE" != "1" ]; then
+                kept="${kept} ${f}"
+                continue
+            fi
+            ;;
+    esac
     mv "${STAGE}/${f}" "${TARGET}/${f}"
 done
 
 chmod +x "${TARGET}/route.py"
 
+
 echo
 echo "Installed ${SKILL_NAME} to ${TARGET}"
-if [ "$kept_policy" = "1" ]; then
-    echo "Kept your existing ${POLICY_FILE}. Re-run with --force to replace it."
-else
-    echo
-    echo "Next step, and do not skip it: edit ${TARGET}/${POLICY_FILE}"
-    echo "It ships allowing five models, four of them self-hosted. Left as-is in a"
-    echo "setup that cannot reach those, the skill will recommend a model nobody can"
-    echo "select. Cut the list down to what your setup actually serves."
+if [ -n "$kept" ]; then
+    echo "Kept your existing${kept}. Re-run with --force to replace them."
 fi
+case " $kept " in
+    *" allowed-models.txt "*) ;;
+    *)
+        echo
+        echo "Next step, and do not skip it: edit ${TARGET}/allowed-models.txt"
+        echo "It ships allowing the five models on the measured frontier, one of them"
+        echo "self-hosted. Left as-is in a setup that cannot reach that one, the skill"
+        echo "will recommend a model nobody can select. Cut the list down to what your"
+        echo "setup actually serves."
+        ;;
+esac

@@ -76,6 +76,18 @@ uv run python summarize_run.py --folder ../swe-benchmark-data/{model-slug}/{harn
 
 The [`/swe-router`](../.claude/skills/swe-router/SKILL.md) skill recommends a model per task. Two scripts measure whether taking its advice would have been worth it, using runs already on disk. Neither script re-runs a model.
 
+The router now routes on a six-question rubric rather than a floor and tier judged in prose, so `run-swe-router-headless.py` has two modes. `--mode rubric` is the current one; `--mode floor` (the default, kept for one release) reproduces the earlier evaluation described below.
+
+**Scoring a dataset's tasks against the rubric.** Each task's difficulty bucket comes from a rubric pass: the judge answers the six questions in [rubric.md](../vend/swe-router/rubric.md) for every task, and `routing-policy.json` turns the answers into a bucket. `build_vended_models.py` reads that pass to build `models.json`'s `score_by_difficulty` columns, so a new dataset -- or any edit to `rubric.md` or the policy -- needs a new pass before the router can route on it:
+
+```bash
+cd benchmarks
+uv run scripts/run-swe-router-headless.py --mode rubric --agent omp --provider bedrock \
+    --model us.anthropic.claude-opus-5-5 --dataset dataset/<dataset>.yaml --repeats 3
+```
+
+Use a strong judge and more than one repeat: a bucket that moves between repeats moves the model the router picks. Writes `docs/metrics/swe-router-rubric-<dataset>-<judge>.json`.
+
 **1. Collect the skill's judgments.** For every task in a dataset, clone the repo at the task's pinned ref and run the skill's step 1 in it (decide a quality floor from the consequence of the change being wrong, and a complexity tier). The agent returns the judgment only. It never selects a model.
 
 ```bash

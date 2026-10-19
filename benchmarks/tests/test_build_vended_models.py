@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,8 +22,12 @@ _spec.loader.exec_module(bvm)
 
 _VEND_DIR = _REPO_ROOT / "vend" / "swe-router"
 
+# The generator's inputs -- the frontier JSON and the per-task run artifacts --
+# are not committed in this repository (see .gitignore), so the tests that read
+# real data instead of a fixture have nothing to read. They stay in the file so
+# they run wherever the data IS present.
 _SKIP_COMMITTED = not (
-    _SCRIPTS_DIR.parent.parent / "docs" / "metrics" / "pareto-frontier-omp-swe3.json"
+    _REPO_ROOT / "docs" / "metrics" / "pareto-frontier-omp-swe3.json"
 ).exists()
 _SKIP_REASON = "docs/metrics/ frontier data not present in this repo"
 
@@ -72,6 +76,19 @@ def _write(data: dict) -> Path:
     return Path(tmp.name)
 
 
+def _runs(dates: dict[str, str | None]) -> Path:
+    """Write one omp/swe3/v2 run summary per model, with the given run_date."""
+    root = Path(tempfile.mkdtemp())
+    for model, run_date in dates.items():
+        folder = root / model / "omp" / "swe3" / "mcp-gateway-registry-v2"
+        folder.mkdir(parents=True)
+        summary: dict = {"model_slug": model, "tasks": []}
+        if run_date:
+            summary["run_date"] = run_date
+        (folder / "run-summary.json").write_text(json.dumps(summary), "utf-8")
+    return root
+
+
 class BuildTest(unittest.TestCase):
     def test_includes_every_model_not_only_the_frontier(self) -> None:
         # The skill filters to what the user's assistant offers before ranking,
@@ -94,7 +111,7 @@ class BuildTest(unittest.TestCase):
         out = bvm.build(_write(_frontier()), _REPO_ROOT)
         note = out["measurement_basis"]["frontier_flags"]
         self.assertIn("not a selection key", note)
-        self.assertIn("score_by_complexity", note)
+        self.assertIn("score_by_difficulty", note)
 
     @unittest.skipIf(_SKIP_COMMITTED, _SKIP_REASON)
     def test_a_frontier_model_can_still_lose_at_a_tier(self) -> None:
@@ -125,7 +142,8 @@ class BuildTest(unittest.TestCase):
     def test_provenance_carries_the_measurement_context(self) -> None:
         # A vended file has no reader who knows this repo, so the context
         # travels with the data.
-        out = bvm.build(_write(_frontier()), _REPO_ROOT)
+        runs = _runs({"big": "2026-10-01", "small": "2026-09-01"})
+        out = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
         p = out["provenance"]
         self.assertEqual(p["harness"], "omp")
         self.assertEqual(p["skill"], "swe3")
@@ -147,6 +165,97 @@ class BuildTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "no all_models"):
             bvm.build(_write(_frontier(all_models=[])), _REPO_ROOT)
 
+    def test_provenance_ignores_where_the_file_lives(self) -> None:
+        # The squash-merge case: the same bytes must stamp the same provenance,
+        # whatever commit or path they arrived under.
+        runs = _runs({"big": "2026-10-01"})
+        first = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
+        second = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
+        keys = ("measured_on", "source_sha256")
+        self.assertEqual(
+            [first["provenance"][k] for k in keys],
+            [second["provenance"][k] for k in keys],
+        )
+
+    def test_source_sha256_changes_with_the_data(self) -> None:
+        runs = _runs({})
+        before = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
+        after = bvm.build(_write(_frontier(note="new")), _REPO_ROOT, runs_dir=runs)
+        self.assertNotEqual(
+            before["provenance"]["source_sha256"],
+            after["provenance"]["source_sha256"],
+        )
+
+    def test_measured_on_is_the_latest_run_of_a_frontier_model(self) -> None:
+        # "other" is not in the frontier JSON, so its later date is ignored.
+        runs = _runs(
+            {"big": "2026-10-01", "small": "2026-09-15", "other": "2026-12-31"}
+        )
+        out = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
+        self.assertEqual(out["provenance"]["measured_on"], "2026-10-01")
+
+    def test_measured_on_is_null_without_any_run_date(self) -> None:
+        runs = _runs({"big": None, "small": None})
+        out = bvm.build(_write(_frontier()), _REPO_ROOT, runs_dir=runs)
+        self.assertIsNone(out["provenance"]["measured_on"])
+
+
+def _rubric_file(tasks: dict[str, dict[str, int]], stored_bucket: str = "easy") -> Path:
+    """A rubric pass whose stored bucket deliberately disagrees with its scores."""
+    body = {
+        "mode": "rubric",
+        "judged_by": {"model": "judge", "repeats": 3},
+        "tasks": {
+            t: {"scores": scores, "bucket": stored_bucket}
+            for t, scores in tasks.items()
+        },
+    }
+    return _write(body)
+
+
+def _scores(difficulty: int) -> dict[str, int]:
+    """Six rubric scores whose four difficulty scores sum to ``difficulty``."""
+    dims = ["hidden_contract", "silent_invariant", "coordinated_surfaces", "ambiguity"]
+    scores = {d: 0 for d in dims} | {"verification": 1, "blast_radius": 1}
+    for i in range(difficulty):
+        scores[dims[i % 4]] += 1
+    return scores
+
+
+class BucketColumnsTest(unittest.TestCase):
+    def _runs(self, rows: list[dict]) -> Path:
+        root = Path(tempfile.mkdtemp())
+        folder = root / "m1" / "omp" / "swe3" / "ds"
+        folder.mkdir(parents=True)
+        summary = {"model_slug": "m1", "tasks": rows}
+        (folder / "run-summary.json").write_text(json.dumps(summary), "utf-8")
+        return root
+
+    def test_buckets_are_recomputed_from_scores_not_read(self) -> None:
+        path = _rubric_file({"a": _scores(5), "b": _scores(1)})
+        buckets = bvm.task_buckets(path, bvm.rubric.DEFAULT_POLICY)
+        self.assertEqual(buckets, {"a": "hard", "b": "easy"})
+
+    def test_columns_average_by_bucket_and_count_failures(self) -> None:
+        runs = self._runs(
+            [
+                {"task": "a", "task_score": 80.0},
+                {"task": "b", "task_score": 70.0},
+                {"task": "c", "task_score": 0, "failed": True},
+            ]
+        )
+        stats = bvm.per_bucket_stats(
+            runs, "omp", "swe3", "ds", {"a": "hard", "b": "hard", "c": "hard"}
+        )
+        self.assertEqual(
+            stats["m1"], {"score": {"hard": 75.0}, "completion": {"hard": "2/3"}}
+        )
+
+    def test_a_task_without_rubric_scores_is_an_error(self) -> None:
+        runs = self._runs([{"task": "a", "task_score": 80.0}])
+        with self.assertRaisesRegex(SystemExit, "no rubric scores"):
+            bvm.per_bucket_stats(runs, "omp", "swe3", "ds", {})
+
 
 @unittest.skipIf(_SKIP_COMMITTED, _SKIP_REASON)
 class CommittedArtifactTest(unittest.TestCase):
@@ -162,6 +271,18 @@ class CommittedArtifactTest(unittest.TestCase):
             expected,
             "vend/swe-router/models.json is stale; run build_vended_models.py",
         )
+
+    def test_score_by_difficulty_is_present_for_every_model(self) -> None:
+        # The skill selects on this column; a model without it cannot be routed.
+        payload = json.loads(bvm.DEFAULT_OUT.read_text(encoding="utf-8"))
+        missing = [
+            m["model"] for m in payload["models"] if not m["score_by_difficulty"]
+        ]
+        self.assertEqual(missing, [])
+
+    def test_provenance_names_the_rubric_pass(self) -> None:
+        payload = json.loads(bvm.DEFAULT_OUT.read_text(encoding="utf-8"))
+        self.assertIn(bvm.RUBRIC_JUDGE, payload["provenance"]["rubric_scores"]["file"])
 
     def test_score_by_complexity_is_present_for_every_model(self) -> None:
         # The skill compares a floor against the tier, not the overall mean.
@@ -201,35 +322,11 @@ class CommittedArtifactTest(unittest.TestCase):
             self.assertLessEqual(min(tiers), m["score"] + 0.01, m["model"])
             self.assertGreaterEqual(max(tiers), m["score"] - 0.01, m["model"])
 
-    def test_source_commit_tracks_the_frontier_not_head(self) -> None:
-        # Stamping HEAD would make the file differ after every unrelated commit
-        # and turn --check into noise. It must identify the data's version.
+    def test_source_sha256_matches_the_committed_frontier_bytes(self) -> None:
+        # What `sha256sum <file> | cut -c1-12` prints, so anyone can check it.
         payload = bvm.build(bvm.DEFAULT_SOURCE, _REPO_ROOT)
-        stamped = payload["provenance"]["source_commit"]
-        head = subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        last_touch = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(_REPO_ROOT),
-                "log",
-                "-1",
-                "--format=%h",
-                "--",
-                str(bvm.DEFAULT_SOURCE.relative_to(_REPO_ROOT)),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        self.assertEqual(stamped, last_touch)
-        if head != last_touch:
-            self.assertNotEqual(stamped, head)
+        digest = hashlib.sha256(bvm.DEFAULT_SOURCE.read_bytes()).hexdigest()[:12]
+        self.assertEqual(payload["provenance"]["source_sha256"], digest)
 
     def test_vend_dir_holds_exactly_the_portable_files(self) -> None:
         # The portability contract: the skill must work in a directory holding
@@ -237,7 +334,7 @@ class CommittedArtifactTest(unittest.TestCase):
         # Importing route.py in tests leaves a __pycache__; it is a build
         # artifact of running the checks, not something anyone installs.
         # install.sh is the installer, not part of the skill: it fetches the
-        # five installed files and never copies itself, so it cannot become a
+        # seven installed files and never copies itself, so it cannot become a
         # runtime dependency. test_installer_installs_exactly_the_skill_files
         # holds that line.
         self.assertEqual(
@@ -250,6 +347,8 @@ class CommittedArtifactTest(unittest.TestCase):
                 "model-aliases.json",
                 "models.json",
                 "route.py",
+                "routing-policy.json",
+                "rubric.md",
             ],
         )
 
@@ -272,40 +371,39 @@ class CommittedArtifactTest(unittest.TestCase):
                 "model-aliases.json",
                 "models.json",
                 "route.py",
+                "routing-policy.json",
+                "rubric.md",
             ],
         )
         self.assertNotIn("install.sh", declared)
 
-    def test_readme_tier_tables_match_the_data(self) -> None:
-        # The README prints the four tier tables so a reader can see the scan.
-        # Hand-copied numbers drift; a regenerated models.json must not leave
-        # the documented tables quietly wrong.
+    def test_readme_bucket_table_matches_the_data(self) -> None:
+        # The README prints every model's per-bucket columns. Hand-copied
+        # numbers drift; a regenerated models.json must not leave the
+        # documented table quietly wrong.
         import re
 
         payload = json.loads(bvm.DEFAULT_OUT.read_text())
         by = {m["model"]: m for m in payload["models"]}
         text = (_VEND_DIR / "README.md").read_text(encoding="utf-8")
-        checked = 0
-        for tier in ("trivial", "low", "medium", "high"):
-            block = text.split(f"**`{tier}`** —", 1)
-            if len(block) < 2:
-                continue
-            table = block[1].split("\n\n", 2)[1]
-            rows = re.findall(
-                r"^\| \$([\d.]+) \| `([^`]+)` \| ([\d.]+) \|", table, re.M
-            )
-            self.assertTrue(rows, f"no rows parsed for {tier}")
-            costs = [float(c) for c, _, _ in rows]
-            self.assertEqual(costs, sorted(costs), f"{tier} table not cheapest-first")
-            for cost, model, score in rows:
-                self.assertAlmostEqual(
-                    float(score), by[model]["score_by_complexity"][tier], places=1
-                )
-                self.assertAlmostEqual(
-                    float(cost), by[model]["cost_per_task_usd"], places=2
-                )
-                checked += 1
-        self.assertGreaterEqual(checked, 60, "expected four full tier tables")
+        rows = re.findall(
+            r"^\| `([^`]+)` \| ([\d.]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$",
+            text,
+            re.M,
+        )
+        self.assertEqual(sorted(r[0] for r in rows), sorted(by))
+        costs = [float(r[1]) for r in rows]
+        self.assertEqual(costs, sorted(costs), "bucket table not cheapest-first")
+        for model, cost, *cells in rows:
+            m = by[model]
+            self.assertAlmostEqual(float(cost), m["cost_per_task_usd"], places=2)
+            for bucket, cell in zip(("moderate", "hard", "very_hard"), cells):
+                score = m["score_by_difficulty"].get(bucket)
+                done = m["completion_by_difficulty"].get(bucket, "")
+                expected = "--" if score is None else f"{score:.1f}"
+                if done and done.split("/")[0] != done.split("/")[1]:
+                    expected += f" ({done})"
+                self.assertEqual(cell.strip(), expected, f"{model} {bucket}")
 
     def test_every_model_has_an_alias_entry(self) -> None:
         # A model with no aliases can never be matched against an assistant's

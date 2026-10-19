@@ -1,5 +1,8 @@
 # Does routing pay for itself?
 
+> [!NOTE]
+> **This measures the previous router.** It scores the version that judged a quality floor and a complexity tier in prose. The skill now routes on the six-question rubric in [vend/swe-router/rubric.md](../vend/swe-router/rubric.md), which replaced that judgment because it was unstable -- the instability this page documents is what motivated the change. The caveats below still describe where the hard part lives; the numbers are not the current router's.
+
 Running `swe-router` against its own evidence: what it picked across 21 tasks, what those picks scored and cost, and the three caveats that decide how far to trust the result.
 
 The results above rank models on a whole dataset. A developer picks one per task, which is a different question -- and the usual answer is "run the best model for everything", which these numbers say is expensive. The **[`/swe-router`](../.claude/skills/swe-router/SKILL.md)** skill answers it per task: read the repository and the change, decide a quality floor from the consequence of getting it wrong and a complexity tier, then take the cheapest measured model that clears the floor at that tier. It recommends and stops. The developer makes the switch.
