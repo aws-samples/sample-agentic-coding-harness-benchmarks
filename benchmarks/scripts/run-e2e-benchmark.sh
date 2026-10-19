@@ -41,15 +41,19 @@ set -euo pipefail
 #
 # Optional flags:
 #   --agent NAME           coding agent that runs the task: claude (Claude Code,
-#                          default), pi, omp (oh-my-pi), codex (OpenAI Codex) or
-#                          kiro. Same task either way. claude, pi, omp and codex
+#                          default), pi, omp (oh-my-pi), codex (OpenAI Codex),
+#                          strands (Strands Agents SDK), strands-harness (the
+#                          Strands create_harness agent) or kiro. Same task
+#                          either way. claude, pi, omp, codex and strands
 #                          support every --provider: an OpenAI-compatible
 #                          endpoint (vllm/litellm) or native Amazon Bedrock.
 #                          codex speaks only the Responses API, so a vllm run
 #                          needs a tool-call parser that accepts
 #                          Responses-shaped tools (qwen3_coder, hermes -- NOT
 #                          minicpm5xml, dots, hy_v3, hy_v4, rust, step3,
-#                          step3p5). See issue #183.
+#                          step3p5). See issue #183. strands needs the optional
+#                          uv dependency group; this script installs it
+#                          (uv sync --group strands) if it is missing.
 #   --skill NAME           SWE skill: swe3 (default, single-agent, no subagents)
 #                          or swe2 (multi-agent fan-out). Same six artifacts. The
 #                          default maps to the canonical harness folder; the
@@ -82,7 +86,7 @@ REPO_ROOT="$(dirname "$BENCHMARKS_DIR")"
 VLLM_DIR="$REPO_ROOT/self-hosted/vllm"
 
 # Defaults
-AGENT="claude"            # coding agent: claude, pi, omp, kiro, or codex
+AGENT="claude"            # coding agent: claude, pi, omp, kiro, codex, strands, or strands-harness
 SKILL="swe3"              # SWE skill: swe3 (single-agent, default) or swe2 (multi-agent)
 PROVIDER=""
 MODEL=""
@@ -164,8 +168,8 @@ case "$PROVIDER" in
 esac
 
 case "$AGENT" in
-    claude|pi|omp|kiro|codex) ;;
-    *) die "invalid agent '$AGENT'. Must be one of: claude, pi, omp, kiro, codex." ;;
+    claude|pi|omp|kiro|codex|strands|strands-harness) ;;
+    *) die "invalid agent '$AGENT'. Must be one of: claude, pi, omp, kiro, codex, strands, strands-harness." ;;
 esac
 case "$SKILL" in
     swe2|swe3) ;;
@@ -213,7 +217,7 @@ ok "runner config: $CONFIG"
 
 # The coding-agent CLIs this benchmark drives must be installed:
 #   - the chosen --agent : produces the artifacts ('claude -p', 'pi -p',
-#     'omp -p', 'kiro-cli chat' or 'codex exec').
+#     'omp -p', 'kiro-cli chat', 'codex exec' or the Strands runner script).
 #   - codex : the judge runs 'codex exec' to score them (unless --skip-judge).
 # Check both here, up front, so a missing codex fails fast instead of after the
 # entire (long) harness run has already completed.
@@ -229,6 +233,15 @@ elif [[ "$AGENT" == "kiro" ]]; then
 elif [[ "$AGENT" == "codex" ]]; then
     command -v codex >/dev/null 2>&1 || die "codex CLI not found on PATH (--agent codex runs 'codex exec'). Install codex."
     ok "codex CLI found: $(command -v codex) ($(codex --version 2>/dev/null || echo 'version unknown'))"
+elif [[ "$AGENT" == "strands" || "$AGENT" == "strands-harness" ]]; then
+    # Strands has no CLI: the harness runs scripts/strands_agent_runner.py with
+    # its own interpreter, so the SDK (and, for strands-harness, the
+    # strands-harness package) must be in this venv (optional group).
+    if ! uv run --group strands python -c "import strands, strands_harness" >/dev/null 2>&1; then
+        info "Strands Agents SDK not installed; running: uv sync --group strands"
+        uv sync --group strands || die "could not install the strands dependency group. Run 'uv sync --group strands' in $BENCHMARKS_DIR and retry."
+    fi
+    ok "Strands Agents SDK found: $(uv run --group strands python -c "import importlib.metadata as m; print(m.version('strands-agents'))")"
 else
     command -v claude >/dev/null 2>&1 || die "claude CLI not found on PATH (the harness runs 'claude -p'). Install Claude Code."
     ok "claude CLI found: $(command -v claude)"
@@ -399,13 +412,17 @@ SLUG="$(uv run python -c "import sys; sys.path.insert(0,'scripts'); from runner_
 # Harness folder level (claude -> claude-code, pi -> pi), from the single source of
 # truth. Skill (swe2/swe3) is its OWN path level, so artifacts live under
 # <model>/<harness>/<skill>/<repo>/<task> and the judge/summary target that tree.
+# agent=strands runs the SDK inside the harness venv; pass its dependency group
+# explicitly so a `uv sync` elsewhere cannot have dropped it.
+UV_GROUP_ARGS=()
+[[ "$AGENT" == "strands" || "$AGENT" == "strands-harness" ]] && UV_GROUP_ARGS=(--group strands)
 HARNESS_SLUG="$(uv run python -c "import sys; sys.path.insert(0,'scripts'); from runner_config import HARNESS_SLUGS; print(HARNESS_SLUGS['$AGENT'])")"
 info "Command:"
-info "  uv run scripts/run-swe-headless.py ${BENCH_ARGS[*]}"
+info "  uv run ${UV_GROUP_ARGS[*]} scripts/run-swe-headless.py ${BENCH_ARGS[*]}"
 info "Artifacts will land under: swe-benchmark-data/$SLUG/$HARNESS_SLUG/$SKILL/<repo>/<task>/"
 info "Watch GPU metrics (vllm path):  cd $VLLM_DIR && uv run python -m clients.build_dashboard && open benchmark-output/dashboard.html"
 echo
-uv run scripts/run-swe-headless.py "${BENCH_ARGS[@]}" \
+uv run "${UV_GROUP_ARGS[@]}" scripts/run-swe-headless.py "${BENCH_ARGS[@]}" \
     || die "benchmark run failed. Inspect the trace above; per-task errors are also recorded in each task's metrics.json."
 ok "Benchmark run complete."
 

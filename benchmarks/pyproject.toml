@@ -23,6 +23,19 @@ dev = [
     "types-requests>=2.32.0",
     "types-pyyaml>=6.0",
 ]
+# Only agent=strands and agent=strands-harness need this:
+# scripts/strands_agent_runner.py drives the task with the Strands Agents SDK.
+# Kept out of the default install so the other harnesses do not pull it in.
+# Install with `uv sync --group strands`. The [openai] extra is the client for
+# OpenAI-compatible endpoints (vLLM, LiteLLM). Floor at 1.57: the vended
+# shell/file_editor tools the runner uses are not in older releases.
+# strands-harness is the Strands team's create_harness() for
+# agent=strands-harness; capped below 0.2 because it is pre-1.0 and its
+# defaults decide what that agent measures.
+strands = [
+    "strands-agents[openai]>=1.57.1,<2",
+    "strands-harness>=0.1.2,<0.2",
+]
 
 # These scripts drive an external coding assistant (Claude Code) and score its
 # artifacts; they do not import the model runtimes. Install them in their own

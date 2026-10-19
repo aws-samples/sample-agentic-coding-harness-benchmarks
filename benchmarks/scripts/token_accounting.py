@@ -58,7 +58,12 @@ PARTITION_TOLERANCE: float = 0.05
 # lands near 50%: fresh input then equals cache_read + cache_write, the partition
 # branch fires, and the total silently loses the entire cache read -- halving the
 # token count and, on the self-hosted path, the derived cost per task (issue #183).
-DISJOINT_CACHE_AGENTS: frozenset[str] = frozenset({"codex"})
+# strands is disjoint for the same reason: ``_strands_result_from_events``
+# subtracts the cached tokens that OpenAI-compatible endpoints fold into
+# ``inputTokens``; Amazon Bedrock already reports them separately.
+DISJOINT_CACHE_AGENTS: frozenset[str] = frozenset(
+    {"codex", "strands", "strands-harness"}
+)
 
 
 def cache_partition_for_agent(agent: str | None) -> bool | None:
