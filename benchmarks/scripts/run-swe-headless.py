@@ -322,11 +322,11 @@ def _build_prompt(
         f"repo: {clone_path} problem: {task.id} model: {model} "
         f'tag: {ref} artifacts_dir: {artifacts_dir} answers: "{answers.strip()}"'
     )
-    if agent in ("pi", "kiro", "omp"):
-        # None of pi, kiro or omp has slash commands; name the skill in prose and
-        # hand it the payload. (pi loads SKILL.md via --skill; kiro and omp have no
-        # --skill flag, so their _build_*_cmd inlines the SKILL.md content ahead of
-        # this prompt.)
+    if agent in ("pi", "kiro", "omp", "strands", "strands-harness"):
+        # None of pi, kiro, omp or strands has slash commands; name the skill in
+        # prose and hand it the payload. (pi loads SKILL.md via --skill; kiro and
+        # omp have no --skill flag, so their _build_*_cmd inlines the SKILL.md
+        # content ahead of this prompt, and the strands runner does the same.)
         invocation = f"Use the {skill} skill to complete this task. {payload}"
     else:
         invocation = f"/{skill} {payload}"
@@ -2370,6 +2370,303 @@ def _run_codex(
     return result
 
 
+# Strands Agents has no CLI; this script is the agent process for agent=strands.
+# It runs under the harness's own interpreter, so the `strands` dependency group
+# must be installed in this venv (`uv sync --group strands`).
+STRANDS_RUNNER = Path(__file__).resolve().parent / "strands_agent_runner.py"
+STRANDS_SDK_MODULE = "strands"
+# agent=strands-harness also needs the Strands team's harness package.
+STRANDS_HARNESS_MODULE = "strands_harness"
+STRANDS_API_KEY_ENV = "STRANDS_API_KEY"
+
+
+def _require_strands_sdk(harness: bool = False) -> None:
+    """Fail fast when a Strands agent is chosen but its packages are missing.
+
+    Args:
+        harness: True for agent=strands-harness, which also needs the
+            ``strands_harness`` package.
+
+    Raises:
+        RuntimeError: If ``strands`` (or ``strands_harness``) cannot be imported.
+    """
+    import importlib.util
+
+    modules = [STRANDS_SDK_MODULE] + ([STRANDS_HARNESS_MODULE] if harness else [])
+    if any(importlib.util.find_spec(m) is None for m in modules):
+        raise RuntimeError(
+            f"agent={'strands-harness' if harness else 'strands'} needs "
+            f"{' and '.join(modules)} in the harness venv. "
+            "From benchmarks/, run `uv sync --group strands`, then start the "
+            "harness with `uv run --group strands scripts/run-swe-headless.py`."
+        )
+
+
+def _build_strands_env(config: RunnerConfig) -> dict[str, str]:
+    """Build the environment for a Strands runner process.
+
+    For provider=bedrock, pins AWS_REGION; credentials come from the ambient AWS
+    chain. For provider=endpoint, passes the API key through STRANDS_API_KEY so
+    it never appears in argv.
+
+    Args:
+        config: The runner config.
+
+    Returns:
+        A copy of the current environment with routing vars set.
+    """
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    if config.is_bedrock:
+        region = config.resolved_region()
+        if region:
+            env["AWS_REGION"] = region
+    else:
+        # resolved_api_key() honours api_key_env, so a real gateway token can come
+        # from the environment instead of the config file. Reading config.api_key
+        # directly here would send the "local" placeholder to a gateway that needs
+        # a genuine credential.
+        env[STRANDS_API_KEY_ENV] = config.resolved_api_key() or "local"
+    return env
+
+
+def _build_strands_cmd(config: RunnerConfig, prompt: str) -> list[str]:
+    """Assemble the argument vector that starts the Strands runner.
+
+    The runner reads SKILL.md from ``--skill-dir`` and puts it ahead of the
+    prompt, worded as ``_build_omp_cmd`` does for omp (issue #201); the prompt
+    names the skill in prose (see ``_build_prompt``). The executable is this interpreter and
+    the script path is fixed; config values are separate list elements, never
+    interpolated into a shell string.
+
+    Args:
+        config: The runner config (model, provider, routing, context window).
+        prompt: The hydrated task prompt (from ``_build_prompt`` agent="strands").
+
+    Returns:
+        The command as a list of arguments.
+    """
+    cmd = [
+        sys.executable,
+        str(STRANDS_RUNNER),
+        "--provider",
+        config.provider,
+        "--model",
+        model_to_wire_id(config.model or ""),
+        "--skill-dir",
+        str(_skill_path(config).parent),
+        "--max-tokens",
+        str(config.max_output_tokens),
+        "--compact-fraction",
+        str(config.auto_compact_fraction),
+    ]
+    if config.is_bedrock:
+        cmd += ["--aws-region", config.resolved_region() or ""]
+    else:
+        cmd += ["--endpoint", config.endpoint or ""]
+    if config.context_window > 0:
+        cmd += ["--context-window", str(config.context_window)]
+    if config.is_strands_harness:
+        cmd.append("--harness")
+    cmd += ["--prompt", prompt]
+    return cmd
+
+
+def _strands_result_from_events(
+    events: list[dict[str, Any]],
+    returncode: int,
+    elapsed: float,
+    model: str = "",
+    endpoint_usage: bool = False,
+) -> dict[str, Any]:
+    """Normalize the Strands runner's JSON-lines output to the claude-shaped result.
+
+    The runner emits one ``result`` event at the end with the SDK's accumulated
+    usage. If the process died before writing it, the last ``model_call`` event's
+    running usage is the best record left, and the run is marked an error.
+
+    The two providers disagree on what ``inputTokens`` means. Amazon Bedrock
+    reports fresh input with the cache reads and writes as separate siblings,
+    which already matches the additive ``usage`` shape this harness uses. The
+    OpenAI-compatible client copies the endpoint's ``prompt_tokens`` (the WHOLE
+    prompt) into ``inputTokens`` and its ``cached_tokens`` subset into
+    ``cacheReadInputTokens``, so for provider=endpoint the cached part is
+    subtracted out; otherwise it would be billed twice, the bug codex had in
+    issue #183.
+
+    Args:
+        events: Parsed JSON event dicts from the runner's stdout.
+        returncode: The process exit code.
+        elapsed: Wall-clock seconds measured by the harness.
+        model: The model id used for cost derivation.
+        endpoint_usage: True for provider=endpoint (usage is a partition).
+
+    Returns:
+        The claude-shaped result dict.
+    """
+    final = next((e for e in reversed(events) if e.get("type") == "result"), None)
+    last_call = next(
+        (e for e in reversed(events) if e.get("type") == "model_call"), None
+    )
+    source = final or last_call or {}
+    raw = source.get("usage") or {}
+    cache_read = int(raw.get("cacheReadInputTokens", 0) or 0)
+    cache_write = int(raw.get("cacheWriteInputTokens", 0) or 0)
+    input_tokens = int(raw.get("inputTokens", 0) or 0)
+    if endpoint_usage:
+        input_tokens = max(input_tokens - cache_read, 0)
+    usage = {
+        "input_tokens": input_tokens,
+        "output_tokens": int(raw.get("outputTokens", 0) or 0),
+    }
+    # vLLM reports no cached_tokens unless started with
+    # --enable-prompt-tokens-details. Leave the keys out rather than record a 0
+    # nobody measured, so _summary_metrics falls back to vLLM's Prometheus
+    # counter, as it does for omp (issue #200).
+    if not endpoint_usage or cache_read or cache_write:
+        usage["cache_read_input_tokens"] = cache_read
+        usage["cache_creation_input_tokens"] = cache_write
+    cost = (
+        _bedrock_cost_usd(
+            model,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        )
+        if model
+        else None
+    )
+    is_error = returncode != 0 or final is None or bool(final.get("is_error"))
+    # _metrics_from_result copies ``result`` into metrics["error"] on failure.
+    if final is None:
+        message = f"strands runner exited ({returncode}) without a result event"
+    elif is_error:
+        message = final.get("error") or f"exit_{returncode}"
+    else:
+        message = final.get("final_message", "")
+    return {
+        "usage": usage,
+        "num_turns": int(source.get("cycle_count", source.get("index", 0)) or 0),
+        "total_cost_usd": cost,
+        "is_error": is_error,
+        "subtype": "success" if not is_error else f"exit_{returncode}",
+        "duration_ms": round(elapsed * 1000),
+        "result": message,
+    }
+
+
+def _run_strands(
+    cmd: list[str],
+    env: dict[str, str],
+    timeout: int,
+    clone_path: Path,
+    model: str = "",
+    endpoint_usage: bool = False,
+    stream_log: Path | None = None,
+) -> dict[str, Any]:
+    """Run the Strands runner and normalize its JSON-lines output.
+
+    Mirrors ``_run_codex``: a watchdog timer enforces the deadline (a stalled
+    child leaves the read loop blocked, so a clock check inside it never runs),
+    each line is echoed to stderr as a live trace, and non-JSON lines (the
+    runner's logs, merged from stderr) are skipped. The process runs in the
+    cloned repo, so the agent's shell starts where the code is. Events are also
+    appended to ``stream_log`` as they arrive, so a timed-out task still leaves
+    a trace to diagnose.
+
+    Args:
+        cmd: The runner argument vector (see ``_build_strands_cmd``).
+        env: Environment for the subprocess.
+        timeout: Wall-clock timeout in seconds.
+        clone_path: The cloned task repo, used as the working directory.
+        model: The model id used for cost derivation.
+        endpoint_usage: True for provider=endpoint (see
+            ``_strands_result_from_events``).
+        stream_log: Optional file the raw stream is appended to.
+
+    Returns:
+        The claude-shaped result dict.
+
+    Raises:
+        RuntimeError: If the runner times out or produces no events.
+    """
+    start = time.time()
+    sink = None
+    if stream_log is not None:
+        stream_log.parent.mkdir(parents=True, exist_ok=True)
+        sink = stream_log.open("a", encoding="utf-8")
+    proc = subprocess.Popen(  # nosec B603 - fixed interpreter + script, list args, no shell
+        cmd,
+        env=env,
+        cwd=str(clone_path),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    if proc.stdout is None:  # pragma: no cover
+        raise RuntimeError("strands runner produced no stdout stream")
+
+    timed_out = threading.Event()
+
+    def _kill_on_deadline() -> None:
+        timed_out.set()
+        proc.kill()
+
+    watchdog = threading.Timer(timeout, _kill_on_deadline)
+    watchdog.daemon = True
+    watchdog.start()
+
+    events: list[dict[str, Any]] = []
+    try:
+        for line in proc.stdout:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            if sink is not None:
+                sink.write(line)
+                sink.flush()
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                events.append(parsed)
+        try:
+            proc.wait(timeout=max(timeout - (time.time() - start), 1))
+        except subprocess.TimeoutExpired as exc:
+            proc.kill()
+            raise RuntimeError(f"strands runner timed out after {timeout}s") from exc
+    finally:
+        watchdog.cancel()
+        proc.stdout.close()
+        if sink is not None:
+            sink.close()
+
+    if timed_out.is_set():
+        raise RuntimeError(f"strands runner timed out after {timeout}s")
+
+    elapsed = time.time() - start
+    if not events:
+        raise RuntimeError(
+            f"strands runner produced no events (exit {proc.returncode}). "
+            "Check the trace above for an import or credential error."
+        )
+    result = _strands_result_from_events(
+        events,
+        proc.returncode,
+        elapsed,
+        model=model,
+        endpoint_usage=endpoint_usage,
+    )
+    result["_elapsed_seconds"] = round(elapsed, 1)
+    return result
+
+
 TOOL_RESULT_PREVIEW_CHARS = 500
 
 
@@ -2977,6 +3274,18 @@ def _run_task(
                 label,
                 run_kind,
             )
+        elif config.is_strands:
+            # The Strands runner is a Python script run by this interpreter; it
+            # puts the SKILL.md ahead of the prompt and works in the clone (see
+            # _run_strands).
+            cmd = _build_strands_cmd(config, prompt)
+            env = _build_strands_env(config)
+            logger.info(
+                "  %s Running strands runner %s (agent=%s, no turn cap)...",
+                label,
+                run_kind,
+                config.agent,
+            )
         else:
             cmd = _build_claude_cmd(
                 config, prompt, stream=stream, clone_path=clone_path
@@ -3035,6 +3344,17 @@ def _run_task(
                 # codex exec outputs JSON-lines events; _run_codex normalizes them.
                 result = _run_codex(
                     cmd, env, config.timeout_seconds, model=config.model or ""
+                )
+            elif config.is_strands:
+                result = _run_strands(
+                    cmd,
+                    env,
+                    config.timeout_seconds,
+                    clone_path,
+                    model=config.model or "",
+                    endpoint_usage=not config.is_bedrock,
+                    stream_log=_artifact_dir(config, dataset, task)
+                    / "strands-stream.jsonl",
                 )
             elif stream:
                 result = _run_claude_streaming(
@@ -3170,6 +3490,8 @@ def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
             cmd = _build_kiro_cmd(config, prompt)
         elif config.is_codex:
             cmd = _build_codex_cmd(config, placeholder, prompt)
+        elif config.is_strands:
+            cmd = _build_strands_cmd(config, prompt)
         else:
             cmd = _build_claude_cmd(config, prompt, clone_path=placeholder)
         print(f"\n=== {task.id} [{task.complexity}] ref={ref} ===")
@@ -3708,7 +4030,9 @@ def _parse_args() -> argparse.Namespace:
         "--agent",
         help="Override: coding agent that runs the task ('claude' for Claude "
         "Code, 'pi' for the pi coding agent, 'omp' for oh-my-pi, 'kiro' for "
-        "kiro-cli, 'codex' for OpenAI Codex). All support provider=bedrock; "
+        "kiro-cli, 'codex' for OpenAI Codex, 'strands' for a Strands Agents "
+        "SDK agent, 'strands-harness' for the Strands create_harness agent). "
+        "All support provider=bedrock; "
         "all except kiro also support provider=endpoint.",
     )
     parser.add_argument(
@@ -3867,6 +4191,12 @@ def main() -> None:
     if args.dry_run:
         _dry_run(config, dataset, tasks)
         return
+    if config.is_strands:
+        try:
+            _require_strands_sdk(harness=config.is_strands_harness)
+        except RuntimeError as exc:
+            logger.error("%s", exc)
+            sys.exit(1)
     if args.verbose and not args.stream:
         logger.warning("--verbose has no effect without --stream; ignoring it.")
     _run(config, dataset, tasks, stream=args.stream, verbose=args.verbose)

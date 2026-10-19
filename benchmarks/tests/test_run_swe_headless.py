@@ -1891,3 +1891,234 @@ class CodexTimeoutTest(unittest.TestCase):
     def test_no_output_from_a_fast_exit_raises(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "produced no output"):
             harness._run_codex(["true"], dict(os.environ), timeout=30)
+
+
+def _strands_result_event(
+    input_tokens: int,
+    output_tokens: int,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    cycles: int = 3,
+    is_error: bool = False,
+) -> dict[str, object]:
+    """Build the final ``result`` event the Strands runner writes."""
+    return {
+        "type": "result",
+        "is_error": is_error,
+        "error": "boom" if is_error else None,
+        "final_message": "DONE",
+        "usage": {
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadInputTokens": cache_read,
+            "cacheWriteInputTokens": cache_write,
+        },
+        "cycle_count": cycles,
+    }
+
+
+class StrandsHarnessTest(unittest.TestCase):
+    """Strands runner command assembly, env routing, and usage normalization."""
+
+    def test_strands_config_accepts_both_providers(self) -> None:
+        bedrock = _config(agent="strands", provider="bedrock", aws_region="us-east-1")
+        endpoint = _config(agent="strands")
+        self.assertEqual(
+            (bedrock.harness_slug, endpoint.harness_slug), ("strands", "strands")
+        )
+
+    def test_strands_harness_has_its_own_results_folder(self) -> None:
+        config = _config(agent="strands-harness")
+        self.assertEqual(
+            (config.harness_slug, config.is_strands, config.is_strands_harness),
+            ("strands-harness", True, True),
+        )
+
+    def test_strands_harness_cmd_passes_the_harness_flag(self) -> None:
+        cmd = harness._build_strands_cmd(_config(agent="strands-harness"), "P")
+        self.assertIn("--harness", cmd)
+
+    def test_strands_cmd_does_not_pass_the_harness_flag(self) -> None:
+        cmd = harness._build_strands_cmd(_config(agent="strands"), "P")
+        self.assertNotIn("--harness", cmd)
+
+    def test_strands_harness_token_counts_are_disjoint(self) -> None:
+        self.assertEqual(harness.cache_partition_for_agent("strands-harness"), False)
+
+    def test_strands_cmd_runs_the_runner_with_this_interpreter(self) -> None:
+        cmd = harness._build_strands_cmd(
+            _config(agent="strands", provider="bedrock", aws_region="us-east-1"),
+            "PROMPT-BODY",
+        )
+        self.assertEqual(cmd[:2], [sys.executable, str(harness.STRANDS_RUNNER)])
+
+    def test_strands_cmd_bedrock_routing(self) -> None:
+        cmd = harness._build_strands_cmd(
+            _config(agent="strands", provider="bedrock", aws_region="us-east-1"),
+            "PROMPT-BODY",
+        )
+        self.assertEqual(cmd[cmd.index("--aws-region") + 1], "us-east-1")
+        self.assertNotIn("--endpoint", cmd)
+
+    def test_strands_cmd_endpoint_routing_and_window(self) -> None:
+        cmd = harness._build_strands_cmd(
+            _config(agent="strands", context_window=262144), "PROMPT-BODY"
+        )
+        self.assertEqual(
+            (
+                cmd[cmd.index("--endpoint") + 1],
+                cmd[cmd.index("--context-window") + 1],
+            ),
+            ("http://127.0.0.1:8000", "262144"),
+        )
+
+    def test_strands_cmd_omits_context_window_when_unset(self) -> None:
+        cmd = harness._build_strands_cmd(_config(agent="strands"), "PROMPT-BODY")
+        self.assertNotIn("--context-window", cmd)
+
+    def test_strands_cmd_passes_skill_dir_and_prompt_last(self) -> None:
+        cmd = harness._build_strands_cmd(_config(agent="strands"), "PROMPT-BODY")
+        skill_dir = Path(cmd[cmd.index("--skill-dir") + 1])
+        self.assertEqual(
+            ((skill_dir / "SKILL.md").is_file(), cmd[-2:]),
+            (True, ["--prompt", "PROMPT-BODY"]),
+        )
+
+    def test_strands_prompt_names_the_skill_in_prose(self) -> None:
+        prompt = harness._build_prompt(
+            _task(),
+            Path("/tmp/clone"),
+            "v1.0.0",
+            "qwen3.6-35b",
+            Path("/tmp/out"),
+            agent="strands",
+            skill="swe3",
+        )
+        self.assertTrue(prompt.startswith("Use the swe3 skill"))
+
+    def test_strands_env_keeps_the_api_key_out_of_argv(self) -> None:
+        config = _config(agent="strands", api_key="sekret")
+        env = harness._build_strands_env(config)
+        cmd = harness._build_strands_cmd(config, "PROMPT-BODY")
+        self.assertEqual(
+            (env[harness.STRANDS_API_KEY_ENV], "sekret" in " ".join(cmd)),
+            ("sekret", False),
+        )
+
+    def test_strands_env_bedrock_pins_region(self) -> None:
+        env = harness._build_strands_env(
+            _config(agent="strands", provider="bedrock", aws_region="us-west-2")
+        )
+        self.assertEqual(env["AWS_REGION"], "us-west-2")
+
+    def test_strands_bedrock_usage_is_passed_through(self) -> None:
+        events = [_strands_result_event(1000, 50, cache_read=4000, cache_write=200)]
+        result = harness._strands_result_from_events(events, 0, 1.0)
+        self.assertEqual(
+            result["usage"],
+            {
+                "input_tokens": 1000,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 4000,
+                "cache_creation_input_tokens": 200,
+            },
+        )
+
+    def test_strands_endpoint_usage_subtracts_cached_from_input(self) -> None:
+        # OpenAI-compatible prompt_tokens includes the cached_tokens subset.
+        events = [_strands_result_event(5000, 50, cache_read=4000)]
+        result = harness._strands_result_from_events(
+            events, 0, 1.0, endpoint_usage=True
+        )
+        self.assertEqual(result["usage"]["input_tokens"], 1000)
+
+    def test_strands_endpoint_usage_never_goes_negative(self) -> None:
+        events = [_strands_result_event(100, 5, cache_read=400)]
+        result = harness._strands_result_from_events(
+            events, 0, 1.0, endpoint_usage=True
+        )
+        self.assertEqual(result["usage"]["input_tokens"], 0)
+
+    def test_strands_endpoint_without_cache_counts_omits_cache_keys(self) -> None:
+        # vLLM reports no cached_tokens by default; a recorded 0 would block the
+        # Prometheus fallback in _summary_metrics (issue #200).
+        result = harness._strands_result_from_events(
+            [_strands_result_event(5000, 50)], 0, 1.0, endpoint_usage=True
+        )
+        self.assertNotIn("cache_read_input_tokens", result["usage"])
+
+    def test_strands_bedrock_without_cache_keeps_zero_cache_keys(self) -> None:
+        result = harness._strands_result_from_events(
+            [_strands_result_event(5000, 50)], 0, 1.0
+        )
+        self.assertEqual(result["usage"]["cache_read_input_tokens"], 0)
+
+    def test_strands_num_turns_is_the_cycle_count(self) -> None:
+        result = harness._strands_result_from_events(
+            [_strands_result_event(10, 1, cycles=42)], 0, 1.0
+        )
+        self.assertEqual(result["num_turns"], 42)
+
+    def test_strands_success_carries_the_final_message(self) -> None:
+        result = harness._strands_result_from_events(
+            [_strands_result_event(10, 1)], 0, 1.0
+        )
+        self.assertEqual((result["is_error"], result["result"]), (False, "DONE"))
+
+    def test_strands_error_event_is_an_error_with_its_message(self) -> None:
+        result = harness._strands_result_from_events(
+            [_strands_result_event(10, 1, is_error=True)], 1, 1.0
+        )
+        self.assertEqual((result["is_error"], result["result"]), (True, "boom"))
+
+    def test_strands_missing_result_falls_back_to_last_model_call(self) -> None:
+        events = [
+            {"type": "model_call", "index": 1, "usage": {"inputTokens": 10}},
+            {"type": "model_call", "index": 2, "usage": {"inputTokens": 99}},
+        ]
+        result = harness._strands_result_from_events(events, -9, 1.0)
+        self.assertEqual(
+            (result["is_error"], result["usage"]["input_tokens"], result["num_turns"]),
+            (True, 99, 2),
+        )
+
+    def test_strands_cost_is_none_for_unpriced_model(self) -> None:
+        result = harness._strands_result_from_events(
+            [_strands_result_event(100, 10)], 0, 1.0, model="some-unpriced-model"
+        )
+        self.assertIsNone(result["total_cost_usd"])
+
+
+class StrandsRunTest(unittest.TestCase):
+    """_run_strands against stand-in child processes (no SDK needed)."""
+
+    def test_silent_process_is_killed_at_the_deadline(self) -> None:
+        start = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "timed out after 1s"):
+            harness._run_strands(
+                ["sleep", "30"], dict(os.environ), timeout=1, clone_path=Path("/tmp")
+            )
+        self.assertLess(time.monotonic() - start, 15)
+
+    def test_no_events_from_a_fast_exit_raises(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "produced no events"):
+            harness._run_strands(
+                ["true"], dict(os.environ), timeout=30, clone_path=Path("/tmp")
+            )
+
+    def test_events_are_parsed_and_log_lines_skipped(self) -> None:
+        event = json.dumps(_strands_result_event(7, 3))
+        script = f"import sys; print('INFO,log line'); print({event!r})"
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "strands-stream.jsonl"
+            result = harness._run_strands(
+                [sys.executable, "-c", script],
+                dict(os.environ),
+                timeout=30,
+                clone_path=Path(tmp),
+                stream_log=log,
+            )
+            logged = log.read_text(encoding="utf-8")
+        self.assertEqual(
+            (result["usage"]["input_tokens"], "log line" in logged), (7, True)
+        )

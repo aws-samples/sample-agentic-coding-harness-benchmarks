@@ -44,7 +44,7 @@ One command per model. The `/benchmark` skill runs the pre-flight checks, the ha
 /benchmark provider=bedrock model=claude-opus-5 dataset=dataset/mcp-gateway-registry-v2.yaml agent=omp
 ```
 
-`agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh) (`--provider bedrock|litellm|vllm --model ... --dataset ... --agent claude|pi|omp|kiro|codex --skill swe2|swe3`). Repeat across your model list, then the generators plot the cost/quality frontier for your repo and model set.
+`agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh) (`--provider bedrock|litellm|vllm --model ... --dataset ... --agent claude|pi|omp|kiro|codex|strands|strands-harness --skill swe2|swe3`). Repeat across your model list, then the generators plot the cost/quality frontier for your repo and model set.
 
 ![Cost versus quality for eleven model classes on one repository: the six on the cost/quality frontier plus five that mark out the spread. Model names are abstracted — closed-source models by tier and generation, open-weight models by parameter count and dense or MoE architecture. A dashed frontier connects the models that nothing else beats on both score and cost.](docs/images/cost-quality-abstracted.png)
 

@@ -159,12 +159,19 @@ AGENT_OMP = "omp"
 AGENT_CODEX = "codex"
 # "strands" is a Strands Agents SDK agent. Strands has no CLI, so the harness runs
 # scripts/strands_agent_runner.py as the agent subprocess; it emits JSON-lines
-# events like pi, omp and codex. The SKILL.md loads through the Strands
-# AgentSkills plugin (the counterpart of pi's --skill), and the agent uses the
-# stock Strands shell and file_editor tools. Supports provider=bedrock
+# events like pi, omp and codex. The SKILL.md goes ahead of the task prompt,
+# as for omp and kiro, and the agent uses the stock Strands shell and
+# file_editor tools. Supports provider=bedrock
 # (BedrockModel) and provider=endpoint (OpenAIModel). Needs the optional
 # `strands` dependency group: `uv sync --group strands`. See docs/strands-setup.md.
 AGENT_STRANDS = "strands"
+# "strands-harness" runs the same runner script with --harness, which builds the
+# agent with the Strands team's create_harness() (the strands-harness package)
+# instead of a hand-built Agent: its shell/read/write/edit tools, its context
+# manager (which offloads large tool results) and its system prompt. Web tools,
+# subagents, memory and sessions are turned off so a run stays single-agent and
+# isolated. Same event stream, token accounting and pricing as "strands".
+AGENT_STRANDS_HARNESS = "strands-harness"
 VALID_AGENTS = {
     AGENT_CLAUDE,
     AGENT_PI,
@@ -172,6 +179,7 @@ VALID_AGENTS = {
     AGENT_OMP,
     AGENT_CODEX,
     AGENT_STRANDS,
+    AGENT_STRANDS_HARNESS,
 }
 DEFAULT_AGENT = AGENT_CLAUDE
 
@@ -187,6 +195,7 @@ HARNESS_SLUGS = {
     AGENT_OMP: "omp",
     AGENT_CODEX: "codex",
     AGENT_STRANDS: "strands",
+    AGENT_STRANDS_HARNESS: "strands-harness",
 }
 
 # kiro-cli bills in credits, not tokens; the harness translates credits (parsed
@@ -498,8 +507,13 @@ class RunnerConfig(BaseModel):
 
     @property
     def is_strands(self) -> bool:
-        """True when the Strands Agents runner drives the task."""
-        return self.agent == AGENT_STRANDS
+        """True when the Strands Agents runner drives the task (either build)."""
+        return self.agent in (AGENT_STRANDS, AGENT_STRANDS_HARNESS)
+
+    @property
+    def is_strands_harness(self) -> bool:
+        """True when the runner builds the agent with create_harness()."""
+        return self.agent == AGENT_STRANDS_HARNESS
 
     @property
     def harness_slug(self) -> str:
@@ -809,7 +823,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--agent",
         help="Override: coding agent that runs the task "
-        "(claude | pi | omp | kiro | codex | strands)",
+        "(claude | pi | omp | kiro | codex | strands | strands-harness)",
     )
     parser.add_argument(
         "--provider", help="Override: routing provider (endpoint | bedrock)"
