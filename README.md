@@ -14,11 +14,7 @@
 <a href="docs/cost-per-task-methodology.md">Cost Methodology</a>
 </p>
 
-<p align="center">
-<video src="https://github.com/user-attachments/assets/84f60f0f-cd7d-4513-b90b-37a0ffb5feed" controls width="820">
-Your browser cannot play this video inline. <a href="https://github.com/user-attachments/assets/84f60f0f-cd7d-4513-b90b-37a0ffb5feed">Download the swe-router explainer</a>.
-</video>
-</p>
+https://github.com/user-attachments/assets/84f60f0f-cd7d-4513-b90b-37a0ffb5feed
 
 <p align="center"><em>swe-router in about 70 seconds: the right model, handed to the developer for each task, while the platform team benchmarks once and spends less.</em></p>
 
@@ -48,9 +44,9 @@ One command per model. The `/benchmark` skill runs the pre-flight checks, the ha
 
 `agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh) (`--provider bedrock|litellm|vllm --model ... --dataset ... --agent claude|pi|omp|kiro|codex|strands|strands-harness --skill swe2|swe3`). Repeat across your model list, then the generators plot the cost/quality frontier for your repo and model set.
 
-![Cost versus quality for eleven model classes on one repository: the six on the cost/quality frontier plus five that mark out the spread. Model names are abstracted — closed-source models by tier and generation, open-weight models by parameter count and dense or MoE architecture. A dashed frontier connects the models that nothing else beats on both score and cost.](docs/images/cost-quality-abstracted.png)
+![Cost versus quality for twelve model classes on one repository: the six on the cost/quality frontier plus six that mark out the spread. Model names are abstracted — closed-source models by tier and generation, open-weight models by parameter count and dense or MoE architecture. A dashed frontier connects the models that nothing else beats on both score and cost.](docs/images/cost-quality-abstracted.png)
 
-**What the shape tells you, and why you should measure your own.** The frontier is a step function, not a line: most of the quality is reached early and cheaply, and past that point each further point of score costs several times more per task. Where those steps fall depends on your code, your tasks and your hardware — the picture above is one repository and one run per task, so the useful output is the *shape*, not the numbers. Eleven of the nineteen models measured are plotted; the eight left out all sit below the frontier, so none of them changes its shape. Model identities are abstracted to their class deliberately: the class is what tells you the hardware a model needs, and that is the part that transfers. Regenerate it for your own repositories with the chart scripts in [`benchmarks/scripts/`](benchmarks/scripts/). The source for this diagram is [`docs/diagrams/cost-quality-abstracted.html`](docs/diagrams/cost-quality-abstracted.html).
+**What the shape tells you, and why you should measure your own.** The frontier is a step function, not a line: most of the quality is reached early and cheaply, and past that point each further point of score costs several times more per task. Where those steps fall depends on your code, your tasks and your hardware — the picture above is one repository and one run per task, so the useful output is the *shape*, not the numbers. Twelve of the twenty-three models measured are plotted; the eleven left out all sit below the frontier, so none of them changes its shape. Model identities are abstracted to their class deliberately: the class is what tells you the hardware a model needs, and that is the part that transfers — the generations match the names in [`vend/swe-router/models.json`](vend/swe-router/models.json). The source for this diagram is [`docs/diagrams/cost-quality-abstracted.html`](docs/diagrams/cost-quality-abstracted.html); edit the data at the top of its script and re-render it at 1600×1104 with a device scale factor of 2 to get the committed 3200×2208 PNG. For charts straight off your own run metrics, use the plot scripts in [`benchmarks/scripts/`](benchmarks/scripts/).
 
 ## Step 2 — Developers install the skill
 
