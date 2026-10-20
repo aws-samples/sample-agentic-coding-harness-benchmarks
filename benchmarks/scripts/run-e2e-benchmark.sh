@@ -339,6 +339,19 @@ esac
 # touch (or clear) the other tasks' existing folders.
 TASKS_ARG=()
 [[ -n "$TASKS" ]] && TASKS_ARG=(--tasks "$TASKS")
+# Confirm every dataset repo answers at its pinned ref BEFORE any task runs. The
+# harness clones per task, so a bad credential or a missing tag would otherwise
+# fail once per task, hours into a batch. Costs seconds (git ls-remote transfers
+# no objects) and is the usual first failure on a private/enterprise repo.
+info "Checking every dataset repo is reachable at its pinned ref..."
+uv run python scripts/preflight_check.py --dataset "$DATASET" "${TASKS_ARG[@]}" --check-repos \
+    || die "one or more dataset repositories could not be reached (see above).
+       A private repo needs a credential available to this shell WITHOUT prompting:
+         git config --global credential.helper store   # then clone once by hand
+       On an internal CA, also export GIT_SSL_CAINFO (git) and NODE_EXTRA_CA_CERTS (the agent CLIs).
+       Setup guide: docs/benchmark-your-own-repo.md"
+ok "All dataset repos reachable."
+
 info "Checking for pre-existing artifact folders (these stall the headless /swe2 overwrite prompt)..."
 set +e
 uv run python scripts/preflight_check.py --dataset "$DATASET" --model "$MODEL" --agent "$AGENT" --skill "$SKILL" "${TASKS_ARG[@]}" --check
