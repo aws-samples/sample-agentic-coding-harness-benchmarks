@@ -1,5 +1,8 @@
 # Does the swe-router pay for itself?
 
+> [!NOTE]
+> **This measures the previous router.** It scores the version that judged a quality floor and a complexity tier in prose. The skill now routes on the six-question rubric in [vend/swe-router/rubric.md](../vend/swe-router/rubric.md), which replaced that judgment because it was unstable -- the instability this page documents is what motivated the change. The caveats below still describe where the hard part lives; the numbers are not the current router's.
+
 > Across the 21 tasks the router selected **3 different models**: **Open dense 27B** 13x, **Closed frontier (gen 3)** 3x, **Open MoE 2.8T / 104B active** 1x. On 4 further task(s) nothing cleared the floor, so the skill's answer was to stay on the baseline.
 >
 > Against running the **Closed frontier (gen 3)** model on everything, that cost **45.4% less** ($137.16 against $251.04) for a quality change of **-4.6%** (78.99 against 82.83 mean task score, -3.84 points).

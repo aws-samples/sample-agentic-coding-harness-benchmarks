@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "generated_by": "benchmarks/scripts/build_vended_models.py",
   "provenance": {
-    "measured_on": "2026-09-10",
+    "measured_on": "2026-10-11",
     "source_file": "docs/metrics/pareto-frontier-omp-swe3.json",
-    "source_commit": "5f32859",
+    "source_sha256": "72b1ed9ee222",
     "harness": "omp",
     "skill": "swe3",
     "dataset": "mcp-gateway-registry-v2",
@@ -13,14 +13,22 @@
       "reasoning_effort": "high",
       "repo_grounded": true
     },
+    "rubric_scores": {
+      "file": "docs/metrics/swe-router-rubric-mcp-gateway-registry-v2-claude-opus-5-5.json",
+      "sha256": "72ef0449b746",
+      "judge": "us.anthropic.claude-opus-5-5",
+      "repeats": 3,
+      "buckets_recomputed_with": "vend/swe-router/routing-policy.json"
+    },
     "repository": "https://github.com/aws-samples/sample-agentic-coding-harness-benchmarks"
   },
   "measurement_basis": {
     "what_the_score_is": "Mean 0-100 score over the dataset's tasks. Each task is judged on six artifacts: a GitHub issue spec, a low-level design, an expert review, a testing plan, a patch, and an implementation summary.",
     "single_repository_warning": "Every task comes from one repository -- a Python/FastAPI and React service with nginx, Terraform, Helm and bash around it. Rankings are more portable than absolute scores, but applying these to a very different codebase is extrapolation.",
     "runs_per_task": 1,
-    "frontier_flags": "on_combined_frontier and on_hosting_frontier mark models that nothing else beats on both score and cost across the WHOLE dataset. They are context for a reader, not a selection key: they come from overall means, so they can disagree with the per-tier ranking. Select on score_by_complexity at the task's tier. on_hosting_frontier is computed within one hosting basis (Bedrock or self-hosted), which is the apples-to-apples comparison; on_combined_frontier mixes the two and is directional.",
-    "complexity_tiers": "trivial / low / medium / high, assigned by the scope of the change. The hardest tasks measured are bounded single-repo changes -- a rate-limiting subsystem, server-side OAuth token storage. Nothing here approaches a rewrite or a language port, so a task far beyond that range is outside what these numbers cover.",
+    "frontier_flags": "on_combined_frontier and on_hosting_frontier mark models that nothing else beats on both score and cost across the WHOLE dataset. They are context for a reader, not a selection key: they come from overall means, so they can disagree with the per-bucket ranking. Select on score_by_difficulty at the task's bucket. on_hosting_frontier is computed within one hosting basis (Bedrock or self-hosted), which is the apples-to-apples comparison; on_combined_frontier mixes the two and is directional.",
+    "difficulty_buckets": "easy / moderate / hard / very_hard: each benchmark task's difficulty level, from four rubric scores (hidden contract, silent invariant, coordinated surfaces, ambiguity) summed and bucketed by routing-policy.json. score_by_difficulty is a model's mean over the tasks in a bucket, failures excluded; completion_by_difficulty is where failures show. A bucket with no benchmark task has no entry.",
+    "complexity_tiers": "trivial / low / medium / high, set by hand in the dataset from the scope of the change; score_by_complexity serves the legacy --tier path only. The hardest tasks measured are bounded single-repo changes -- a rate-limiting subsystem, server-side OAuth token storage. Nothing here approaches a rewrite or a language port, so a task far beyond that range is outside what these numbers cover.",
     "cost_basis": {
       "Bedrock": "Metered Amazon Bedrock token pricing -- what the invoice says.",
       "self-hosted": "The server's hourly price divided by throughput measured at a stated concurrency -- a shared server under load, which is how a platform team runs one for a group of developers. A cost per task on the same footing as a metered bill."
@@ -37,11 +45,54 @@
       "excluded_tasks": [],
       "on_combined_frontier": true,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 87.4,
+        "hard": 84.26,
+        "very_hard": 80.22
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 83.8,
         "low": 86.2,
         "medium": 81.77,
         "high": 79.76
+      },
+      "completion_by_complexity": {
+        "trivial": "5/5",
+        "low": "5/5",
+        "medium": "6/6",
+        "high": "5/5"
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "score": 81.16,
+      "cost_per_task_usd": 4.44,
+      "hosting": "Bedrock",
+      "tasks_completed": 21,
+      "tasks_total": 21,
+      "excluded_tasks": [],
+      "on_combined_frontier": true,
+      "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 89.7,
+        "hard": 80.36,
+        "very_hard": 80.16
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
+      "score_by_complexity": {
+        "trivial": 81.52,
+        "low": 83.16,
+        "medium": 79.97,
+        "high": 80.24
       },
       "completion_by_complexity": {
         "trivial": "5/5",
@@ -58,13 +109,56 @@
       "tasks_completed": 21,
       "tasks_total": 21,
       "excluded_tasks": [],
-      "on_combined_frontier": true,
+      "on_combined_frontier": false,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 86.8,
+        "hard": 80.98,
+        "very_hard": 77.67
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 84.96,
         "low": 82.64,
         "medium": 78.5,
         "high": 74.68
+      },
+      "completion_by_complexity": {
+        "trivial": "5/5",
+        "low": "5/5",
+        "medium": "6/6",
+        "high": "5/5"
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "score": 79.49,
+      "cost_per_task_usd": 2.62,
+      "hosting": "Bedrock",
+      "tasks_completed": 21,
+      "tasks_total": 21,
+      "excluded_tasks": [],
+      "on_combined_frontier": true,
+      "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 86.5,
+        "hard": 80.12,
+        "very_hard": 77.22
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
+      "score_by_complexity": {
+        "trivial": 77.36,
+        "low": 83.76,
+        "medium": 82.9,
+        "high": 73.24
       },
       "completion_by_complexity": {
         "trivial": "5/5",
@@ -81,8 +175,18 @@
       "tasks_completed": 21,
       "tasks_total": 21,
       "excluded_tasks": [],
-      "on_combined_frontier": true,
+      "on_combined_frontier": false,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 84.8,
+        "hard": 81.02,
+        "very_hard": 75.87
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 81.8,
         "low": 84.24,
@@ -108,6 +212,16 @@
       ],
       "on_combined_frontier": true,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 83.6,
+        "hard": 81.34,
+        "very_hard": 73.62
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "8/9"
+      },
       "score_by_complexity": {
         "trivial": 81.4,
         "low": 80.92,
@@ -130,7 +244,17 @@
       "tasks_total": 21,
       "excluded_tasks": [],
       "on_combined_frontier": false,
-      "on_hosting_frontier": true,
+      "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 81.8,
+        "hard": 78.1,
+        "very_hard": 74.64
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 76.12,
         "low": 80.48,
@@ -154,6 +278,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 81.0,
+        "hard": 76.5,
+        "very_hard": 73.4
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 77.76,
         "low": 77.0,
@@ -177,6 +311,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 81.1,
+        "hard": 74.9,
+        "very_hard": 73.02
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 73.84,
         "low": 81.08,
@@ -191,6 +335,74 @@
       }
     },
     {
+      "model": "kimi-k3-bedrock",
+      "score": 72.87,
+      "cost_per_task_usd": 3.87,
+      "hosting": "Bedrock",
+      "tasks_completed": 21,
+      "tasks_total": 21,
+      "excluded_tasks": [],
+      "on_combined_frontier": false,
+      "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 83.6,
+        "hard": 73.08,
+        "very_hard": 70.24
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
+      "score_by_complexity": {
+        "trivial": 73.6,
+        "low": 80.08,
+        "medium": 66.03,
+        "high": 73.12
+      },
+      "completion_by_complexity": {
+        "trivial": "5/5",
+        "low": "5/5",
+        "medium": "6/6",
+        "high": "5/5"
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "score": 72.69,
+      "cost_per_task_usd": 0.14,
+      "hosting": "Bedrock",
+      "tasks_completed": 20,
+      "tasks_total": 21,
+      "excluded_tasks": [
+        "registration-admission-control-gate"
+      ],
+      "on_combined_frontier": true,
+      "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 83.2,
+        "hard": 76.52,
+        "very_hard": 65.28
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "8/9"
+      },
+      "score_by_complexity": {
+        "trivial": 74.92,
+        "low": 79.16,
+        "medium": 73.9,
+        "high": 60.0
+      },
+      "completion_by_complexity": {
+        "trivial": "5/5",
+        "low": "5/5",
+        "medium": "6/6",
+        "high": "4/5"
+      }
+    },
+    {
       "model": "claude-opus-4-6-v1",
       "score": 70.64,
       "cost_per_task_usd": 4.95,
@@ -200,6 +412,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 78.8,
+        "hard": 73.84,
+        "very_hard": 65.27
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 74.2,
         "low": 75.4,
@@ -226,6 +448,16 @@
       ],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 79.9,
+        "hard": 71.9,
+        "very_hard": 62.09
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "7/9"
+      },
       "score_by_complexity": {
         "trivial": 72.36,
         "low": 71.68,
@@ -248,7 +480,17 @@
       "tasks_total": 21,
       "excluded_tasks": [],
       "on_combined_frontier": false,
-      "on_hosting_frontier": true,
+      "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 68.0,
+        "hard": 70.86,
+        "very_hard": 60.91
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 68.8,
         "low": 66.24,
@@ -272,6 +514,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 66.7,
+        "hard": 64.94,
+        "very_hard": 56.89
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 64.44,
         "low": 63.92,
@@ -295,6 +547,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 74.3,
+        "hard": 60.9,
+        "very_hard": 57.02
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 65.72,
         "low": 60.64,
@@ -316,8 +578,18 @@
       "tasks_completed": 21,
       "tasks_total": 21,
       "excluded_tasks": [],
-      "on_combined_frontier": true,
+      "on_combined_frontier": false,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 68.6,
+        "hard": 63.0,
+        "very_hard": 54.16
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 66.52,
         "low": 63.28,
@@ -339,8 +611,18 @@
       "tasks_completed": 21,
       "tasks_total": 21,
       "excluded_tasks": [],
-      "on_combined_frontier": true,
+      "on_combined_frontier": false,
       "on_hosting_frontier": true,
+      "score_by_difficulty": {
+        "moderate": 62.6,
+        "hard": 62.28,
+        "very_hard": 55.11
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 58.44,
         "low": 62.48,
@@ -363,7 +645,17 @@
       "tasks_total": 21,
       "excluded_tasks": [],
       "on_combined_frontier": false,
-      "on_hosting_frontier": true,
+      "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 62.7,
+        "hard": 57.04,
+        "very_hard": 53.78
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 55.4,
         "low": 57.8,
@@ -387,6 +679,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 58.9,
+        "hard": 58.24,
+        "very_hard": 52.73
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 54.72,
         "low": 60.2,
@@ -416,6 +718,16 @@
       ],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 65.7,
+        "hard": 55.2,
+        "very_hard": 44.48
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "6/10",
+        "very_hard": "8/9"
+      },
       "score_by_complexity": {
         "trivial": 56.5,
         "low": 61.33,
@@ -442,6 +754,16 @@
       ],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 42.6,
+        "hard": 47.2,
+        "very_hard": 37.4
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "9/10",
+        "very_hard": "8/9"
+      },
       "score_by_complexity": {
         "trivial": 43.76,
         "low": 50.96,
@@ -465,6 +787,16 @@
       "excluded_tasks": [],
       "on_combined_frontier": false,
       "on_hosting_frontier": false,
+      "score_by_difficulty": {
+        "moderate": 52.4,
+        "hard": 45.44,
+        "very_hard": 37.22
+      },
+      "completion_by_difficulty": {
+        "moderate": "2/2",
+        "hard": "10/10",
+        "very_hard": "9/9"
+      },
       "score_by_complexity": {
         "trivial": 45.6,
         "low": 48.4,

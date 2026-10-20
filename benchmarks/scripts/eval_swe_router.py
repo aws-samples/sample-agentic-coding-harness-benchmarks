@@ -52,6 +52,8 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import yaml
@@ -78,6 +80,12 @@ _SKILL_DIR = REPO_ROOT / ".claude" / "skills" / "swe-router"
 sys.path.insert(0, str(_SKILL_DIR))
 
 from route import RouteError, route  # noqa: E402
+from swe_router_rubric import (  # noqa: E402
+    BUCKET_TO_ROUTE_TIER,
+    load_policy,
+    relative_bucket,
+    relative_edges,
+)
 
 # Hardware-derived $/token for self-hosted models, same source and same
 # "cheapest sustainable concurrency level" rule plot_cost_quality.py uses, so a
@@ -102,6 +110,11 @@ TIERS = ("trivial", "low", "medium", "high")
 # tasks run once each. Mirrors the skill's tie band; kept as a constant so the
 # report can state the band it applied.
 DEFAULT_TIE_BAND = 3.0
+# --column-model regression routes on one predicted score per model and task.
+# route.py still selects by tier key, so the predictions travel under this one.
+PREDICTED_TIER = "medium"
+# Below this many scored tasks a model's line is not fitted; its mean stands in.
+MIN_POINTS_FOR_FIT = 3
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -319,6 +332,7 @@ def _route_task(
     allowed_file: Path | None,
     no_allow_list: bool,
     tie_band: float,
+    min_completion: float = 0.0,
 ) -> dict[str, Any]:
     """Ask the router for one task's model.
 
@@ -330,6 +344,8 @@ def _route_task(
         allowed_file: Explicit allow-list path, or None to let route.py find one.
         no_allow_list: Ignore organisational policy entirely.
         tie_band: Points below which two models count as tied.
+        min_completion: Skip a model that finished less than this share of the
+            tasks in the column it is read from.
 
     Returns:
         The route.py result dict.
@@ -346,7 +362,90 @@ def _route_task(
         allowed_file=allowed_file,
         no_allow_list=no_allow_list,
         tie_band=tie_band,
+        min_completion=min_completion,
     )
+
+
+def _regrouped(
+    results: dict[str, dict[str, dict[str, Any]]],
+    columns: dict[str, str],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """A copy of the results with each task filed under the given column."""
+    return {
+        model: {
+            task_id: {
+                **record,
+                "complexity": columns.get(task_id, record["complexity"]),
+            }
+            for task_id, record in per_task.items()
+        }
+        for model, per_task in results.items()
+    }
+
+
+def _fit_line(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """Least-squares line through (difficulty sum, score) points.
+
+    Falls back to a flat line at the mean when there are too few points or no
+    spread in difficulty, where a slope would be noise.
+
+    Args:
+        points: ``(x, y)`` pairs.
+
+    Returns:
+        ``(intercept, slope)``.
+    """
+    ys = [y for _, y in points]
+    if len(points) < MIN_POINTS_FOR_FIT:
+        return (statistics.fmean(ys) if ys else 0.0), 0.0
+    xs = [x for x, _ in points]
+    x_mean, y_mean = statistics.fmean(xs), statistics.fmean(ys)
+    sxx = sum((x - x_mean) ** 2 for x in xs)
+    if sxx == 0:
+        return y_mean, 0.0
+    slope = sum((x - x_mean) * (y - y_mean) for x, y in points) / sxx
+    return y_mean - slope * x_mean, slope
+
+
+def _predicted_stats(
+    results: dict[str, dict[str, dict[str, Any]]],
+    sums: dict[str, int],
+    task_id: str,
+    holdout: bool,
+) -> dict[str, dict[str, Any]]:
+    """Each model's stats for routing one task, its score predicted from difficulty.
+
+    For every model, fits score against the rubric's difficulty sum over its
+    scored runs on the other tasks (all tasks without ``holdout``) and predicts
+    its score at this task's sum. Every task informs every prediction, so no
+    model's estimate rests on a thin column. Failed runs are left out of the
+    fit, as they are left out of the column means; the completion count still
+    reports them.
+
+    Args:
+        results: Output of ``_load_results``.
+        sums: Each task's consolidated difficulty sum from the rubric pass.
+        task_id: The task being routed.
+        holdout: Fit without the routed task.
+
+    Returns:
+        ``_tier_stats``-shaped stats with the prediction under ``PREDICTED_TIER``.
+    """
+    exclude = task_id if holdout else None
+    stats = _tier_stats(results, exclude_task=exclude)
+    for model, s in stats.items():
+        points = [
+            (float(sums[tid]), rec["score"])
+            for tid, rec in results[model].items()
+            if tid != exclude and tid in sums and not rec["failed"]
+        ]
+        intercept, slope = _fit_line(points)
+        predicted = min(100.0, max(0.0, intercept + slope * sums[task_id]))
+        s["score_by_complexity"] = {PREDICTED_TIER: round(predicted, 2)}
+        s["completion_by_complexity"] = {
+            PREDICTED_TIER: f"{s['tasks_completed']}/{s['tasks_total']}"
+        }
+    return stats
 
 
 def _evaluate(
@@ -361,6 +460,10 @@ def _evaluate(
     holdout: bool,
     provenance: dict[str, Any],
     judged_tiers: dict[str, str] | None = None,
+    column_for: Callable[[str], dict[str, str]] | None = None,
+    stats_for: Callable[[str], dict[str, dict[str, Any]]] | None = None,
+    fixed_stats: dict[str, dict[str, Any]] | None = None,
+    min_completion: float = 0.0,
 ) -> dict[str, Any]:
     """Replay the router over every task and compare it to the baseline.
 
@@ -377,6 +480,17 @@ def _evaluate(
         provenance: Provenance block for the synthesized models.json.
         judged_tiers: Per-task tier from a judged run, overriding the dataset's
             own ``complexity`` label. None keeps the dataset label.
+        column_for: Given the task being routed, the column of EVERY task, used
+            both to route it and to rebuild the columns it is routed against.
+            Lets the grouping itself depend on the held-out task, as relative
+            rubric buckets do. Overrides ``judged_tiers`` and the dataset label.
+        stats_for: Given the task being routed, every model's stats with one
+            predicted score under ``PREDICTED_TIER``. Overrides ``column_for``.
+        fixed_stats: Every model's stats from ANOTHER dataset, routed against
+            for every task. ``results`` then only supplies each routed task's
+            outcome. ``column_for`` still names the routed task's column.
+        min_completion: Passed to route.py: skip a model whose completion in
+            the column falls below this share.
 
     Returns:
         A result mapping with ``rows`` (one per task) and ``totals``.
@@ -394,7 +508,8 @@ def _evaluate(
     tmp_dir = Path(tempfile.mkdtemp(prefix="router-eval-"))
     in_sample_path = tmp_dir / "models-in-sample.json"
     in_sample_path.write_text(
-        json.dumps(_models_json(_tier_stats(results), provenance)), encoding="utf-8"
+        json.dumps(_models_json(fixed_stats or _tier_stats(results), provenance)),
+        encoding="utf-8",
     )
     for task in tasks:
         task_id = task["id"]
@@ -403,13 +518,25 @@ def _evaluate(
         # the router a perfect classifier it would not have in real use.
         tier = judged_tiers.get(task_id, task["complexity"])
         floor = floors.get(task_id, DEFAULT_FLOOR)
-        if holdout:
+        grouped = results
+        if column_for is not None:
+            columns = column_for(task_id)
+            tier = columns[task_id]
+            grouped = _regrouped(results, columns)
+        if fixed_stats is not None:
+            models_path = in_sample_path
+        elif stats_for is not None:
+            tier = PREDICTED_TIER
             models_path = tmp_dir / f"models-{task_id}.json"
             models_path.write_text(
-                json.dumps(
-                    _models_json(_tier_stats(results, exclude_task=task_id), provenance)
-                ),
+                json.dumps(_models_json(stats_for(task_id), provenance)),
                 encoding="utf-8",
+            )
+        elif holdout or column_for is not None:
+            models_path = tmp_dir / f"models-{task_id}.json"
+            stats = _tier_stats(grouped, exclude_task=task_id if holdout else None)
+            models_path.write_text(
+                json.dumps(_models_json(stats, provenance)), encoding="utf-8"
             )
         else:
             models_path = in_sample_path
@@ -421,6 +548,7 @@ def _evaluate(
             allowed_file=allowed_file,
             no_allow_list=no_allow_list,
             tie_band=tie_band,
+            min_completion=min_completion,
         )
         row = _row(task_id, tier, floor, routed, results, baseline)
         row["dataset_complexity"] = task["complexity"]
@@ -553,9 +681,30 @@ def _totals(rows: list[dict[str, Any]], baseline: str) -> dict[str, Any]:
         "baseline_mean_score": round(base_mean, 2),
         "routed_mean_score": round(routed_mean, 2),
         "mean_score_delta": round(routed_mean - base_mean, 2),
+        # The same comparison over EVERY task, a failed run counted as 0. The
+        # paired means above leave out a task the routed model failed, which
+        # flatters a router that picks a model that then fails outright.
+        "baseline_mean_score_failures_as_zero": round(
+            statistics.fmean(r["baseline_score"] or 0.0 for r in rows), 2
+        )
+        if rows
+        else 0.0,
+        "routed_mean_score_failures_as_zero": round(
+            statistics.fmean(r["actual_score"] or 0.0 for r in rows), 2
+        )
+        if rows
+        else 0.0,
         # The router's own failure mode: it picked a model to clear a floor and
         # the model then landed under it. Counted for both arms so the baseline
         # is held to the same test.
+        "mean_score_delta_failures_as_zero": round(
+            statistics.fmean(
+                (r["actual_score"] or 0.0) - (r["baseline_score"] or 0.0) for r in rows
+            ),
+            2,
+        )
+        if rows
+        else 0.0,
         "tasks_below_floor_routed": sum(1 for r in rows if not r["met_floor"]),
         "tasks_below_floor_baseline": sum(
             1
@@ -761,7 +910,10 @@ def _document(report: dict[str, Any]) -> str:
     cfg = report["config"]
     prov = report["provenance"]
     sampling = (
-        "Leave-one-out: each task routes from tier means recomputed with that "
+        f"Zero-shot: every task routes from columns built on `{cfg['columns_from']}` "
+        "alone, a different repository, so no pick saw any task of this one."
+        if cfg.get("columns_from")
+        else "Leave-one-out: each task routes from tier means recomputed with that "
         "task excluded, so no pick knows the run it is scored against."
         if cfg["holdout"]
         else "In-sample: the router read tier means computed from these same "
@@ -836,6 +988,104 @@ def _load_tasks(dataset_path: Path) -> tuple[list[dict[str, Any]], str]:
     return tasks, data.get("output_scope") or data.get("name")
 
 
+def _apply_rubric_inputs(
+    path: Path,
+    tasks: list[dict[str, Any]],
+    bucketing: str,
+    holdout: bool,
+) -> tuple[dict[str, float], Callable[[str], dict[str, str]], dict[str, Any]]:
+    """Route on a rubric pass instead of the skill's floor and tier.
+
+    Each task's required quality becomes its floor and its difficulty bucket its
+    column, and the columns are rebuilt to match: every model's existing score
+    on a task is filed under that task's bucket rather than its dataset tier.
+    No run is repeated; only the grouping changes.
+
+    ``absolute`` bucketing uses the bucket the rubric pass recorded.
+    ``relative`` cuts the tasks' difficulty sums into quarters -- with
+    ``holdout``, quarters of the OTHER tasks, so the routed task never shapes
+    the boundaries it is placed by. route.py still knows four tier names, so
+    the buckets travel as those keys (``BUCKET_TO_ROUTE_TIER``).
+
+    Args:
+        path: A rubric-inputs JSON from ``run-swe-router-headless.py --mode rubric``.
+        tasks: Dataset tasks.
+        bucketing: ``absolute`` or ``relative``.
+        holdout: Leave the routed task out of the quarters (relative only).
+
+    Returns:
+        Per-task floors, the per-task column function for ``_evaluate``, and the
+        rubric pass's metadata.
+
+    Raises:
+        SystemExit: If the file is not a rubric pass or misses a task.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("mode") != "rubric":
+        raise SystemExit(f"{path} is not a rubric pass (mode={data.get('mode')!r})")
+    scored = data.get("tasks") or {}
+    missing = {t["id"] for t in tasks} - set(scored)
+    if missing:
+        raise SystemExit(
+            f"--rubric-inputs is missing {len(missing)} task(s): {', '.join(sorted(missing))}"
+        )
+    floors = {tid: float(v["required_quality"]) for tid, v in scored.items()}
+    sums = {tid: int(v["difficulty_sum"]) for tid, v in scored.items()}
+    absolute = {tid: BUCKET_TO_ROUTE_TIER[v["bucket"]] for tid, v in scored.items()}
+
+    def column_for(routed: str) -> dict[str, str]:
+        if bucketing == "absolute":
+            return absolute
+        reference = [s for tid, s in sums.items() if not (holdout and tid == routed)]
+        edges = relative_edges(reference)
+        return {
+            tid: BUCKET_TO_ROUTE_TIER[relative_bucket(s, edges)]
+            for tid, s in sums.items()
+        }
+
+    meta = dict(data.get("judged_by") or {})
+    meta.update(mode="rubric", bucketing=bucketing)
+    return floors, column_for, meta
+
+
+def _columns_from_other_dataset(
+    dataset_path: Path,
+    rubric_inputs: Path,
+    harness: str,
+    skill: str,
+) -> tuple[dict[str, dict[str, Any]], str]:
+    """Every model's bucket columns, built from a different dataset.
+
+    This is the zero-shot case: the router has only another repository's
+    benchmark to go on. Each of that dataset's tasks is filed under the bucket
+    its own rubric pass gave it, and the columns are its models' means there.
+    Buckets are absolute, so the routed tasks are placed by the same fixed
+    ranges.
+
+    Args:
+        dataset_path: The dataset whose results build the columns.
+        rubric_inputs: That dataset's rubric pass.
+        harness: Harness folder.
+        skill: Skill folder.
+
+    Returns:
+        ``_tier_stats`` output for that dataset, and its scope.
+
+    Raises:
+        SystemExit: If the dataset has no results or the rubric pass misses a task.
+    """
+    tasks, scope = _load_tasks(dataset_path)
+    results = _load_results(harness, skill, scope)
+    if not results:
+        raise SystemExit(
+            f"no results for --columns-from under {harness}/{skill}/{scope}"
+        )
+    _, column_for, _ = _apply_rubric_inputs(rubric_inputs, tasks, "absolute", False)
+    known = {t["id"] for t in tasks}
+    columns = {tid: c for tid, c in column_for("").items() if tid in known}
+    return _tier_stats(_regrouped(results, columns)), scope
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -879,6 +1129,45 @@ def _parse_args() -> argparse.Namespace:
         "--floor/--floor-sweep and the dataset's complexity label.",
     )
     parser.add_argument(
+        "--rubric-inputs",
+        type=Path,
+        default=None,
+        help="JSON from run-swe-router-headless.py --mode rubric. Each task's "
+        "required quality is its floor and its difficulty bucket its column; "
+        "every model's existing scores are regrouped by bucket. Replaces "
+        "--judged-inputs, --floor and the dataset's complexity label.",
+    )
+    parser.add_argument(
+        "--bucketing",
+        choices=("absolute", "relative"),
+        default=None,
+        help="Difficulty buckets for --rubric-inputs: absolute ranges, or "
+        "quarters of the tasks' own difficulty sums. Default: the routing "
+        "policy's difficulty.bucketing.",
+    )
+    parser.add_argument(
+        "--column-model",
+        choices=("buckets", "regression"),
+        default="buckets",
+        help="With --rubric-inputs: compare the required quality against bucket "
+        "column means, or against each model's score predicted from the task's "
+        "difficulty sum by a line fitted over the other tasks. Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--columns-from",
+        type=Path,
+        default=None,
+        help="Zero-shot replay: build the bucket columns from THIS other dataset's "
+        "results instead of --dataset's, and route --dataset's tasks against them. "
+        "Needs --rubric-inputs and --columns-rubric-inputs; absolute buckets only.",
+    )
+    parser.add_argument(
+        "--columns-rubric-inputs",
+        type=Path,
+        default=None,
+        help="The rubric pass for --columns-from's dataset.",
+    )
+    parser.add_argument(
         "--floors-file",
         type=Path,
         default=None,
@@ -903,6 +1192,14 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_TIE_BAND,
         help="Points below which two models count as tied. Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--min-completion",
+        type=float,
+        default=0.0,
+        help="Skip a model that finished less than this share of the tasks in "
+        "the column it is read from, as the shipped policy's "
+        "min_completion_in_bucket does (1.0). Default: %(default)s, the old rule.",
     )
     parser.add_argument(
         "--holdout",
@@ -957,6 +1254,41 @@ def main() -> None:
     judged_tiers: dict[str, str] = {}
     judged_meta: dict[str, Any] = {}
     file_floors: dict[str, float] = {}
+    if args.rubric_inputs and args.judged_inputs:
+        raise SystemExit("use --rubric-inputs or --judged-inputs, not both")
+    column_for = None
+    stats_for = None
+    if args.column_model == "regression" and not args.rubric_inputs:
+        raise SystemExit("--column-model regression needs --rubric-inputs")
+    if args.rubric_inputs:
+        bucketing = args.bucketing or load_policy().difficulty.bucketing
+        file_floors, column_for, judged_meta = _apply_rubric_inputs(
+            args.rubric_inputs, tasks, bucketing, args.holdout
+        )
+        if args.column_model == "regression":
+            scored = json.loads(args.rubric_inputs.read_text(encoding="utf-8"))["tasks"]
+            sums = {tid: int(v["difficulty_sum"]) for tid, v in scored.items()}
+
+            stats_for = partial(_predicted_stats, results, sums, holdout=args.holdout)
+            judged_meta["column_model"] = "regression"
+    fixed_stats = None
+    if args.columns_from:
+        if not (args.rubric_inputs and args.columns_rubric_inputs):
+            raise SystemExit(
+                "--columns-from needs --rubric-inputs and --columns-rubric-inputs"
+            )
+        if bucketing != "absolute" or args.column_model != "buckets" or args.holdout:
+            raise SystemExit(
+                "--columns-from supports absolute buckets only, without --holdout "
+                "(the routed tasks are never in the columns)"
+            )
+        columns_path = args.columns_from
+        if not columns_path.is_absolute():
+            columns_path = BENCHMARKS_DIR / columns_path
+        fixed_stats, columns_scope = _columns_from_other_dataset(
+            columns_path, args.columns_rubric_inputs, args.harness, args.skill
+        )
+        judged_meta["columns_from"] = columns_scope
     if args.judged_inputs:
         judged = json.loads(args.judged_inputs.read_text(encoding="utf-8"))
         judged_meta = judged.get("judged_by") or {}
@@ -998,21 +1330,31 @@ def main() -> None:
                 holdout=args.holdout,
                 provenance=provenance,
                 judged_tiers=judged_tiers,
+                column_for=column_for,
+                stats_for=stats_for,
+                fixed_stats=fixed_stats,
+                min_completion=args.min_completion,
             )
         except RouteError as exc:
             raise SystemExit(f"routing failed at floor {floor}: {exc}") from exc
         totals = evaluated["totals"]
         logger.info(
             "floor %.0f: %s -> $%.2f vs $%.2f baseline (%.1f%% saved), "
-            "mean score %.2f vs %.2f (%+.2f), %d task(s) under floor",
+            "mean score %.2f vs %.2f (%+.2f; %+.2f with failures as 0), "
+            "%d task(s) under floor",
             floor,
-            "leave-one-out" if args.holdout else "in-sample",
+            "zero-shot"
+            if fixed_stats
+            else "leave-one-out"
+            if args.holdout
+            else "in-sample",
             totals["routed_total_cost_usd"],
             totals["baseline_total_cost_usd"],
             totals["cost_saving_pct"],
             totals["routed_mean_score"],
             totals["baseline_mean_score"],
             totals["mean_score_delta"],
+            totals["mean_score_delta_failures_as_zero"],
             totals["tasks_below_floor_routed"],
         )
         runs.append({"floor": None if file_floors else floor, **evaluated})
@@ -1030,9 +1372,15 @@ def main() -> None:
             "no_allow_list": args.no_allow_list,
             "tie_band": args.tie_band,
             "holdout": args.holdout,
+            "columns_from": judged_meta.get("columns_from"),
+            "min_completion": args.min_completion,
             "judged_by": judged_meta,
             "floor_note": (
-                "Judged per task by "
+                "Required quality per task, from the rubric pass by "
+                f"{judged_meta.get('harness')} + {judged_meta.get('model')}: blast "
+                "radius and verification, priced by routing-policy.json."
+                if judged_meta.get("mode") == "rubric"
+                else "Judged per task by "
                 f"{judged_meta.get('harness')} + {judged_meta.get('model')} "
                 "running the skill's step 1 against the cloned repo -- the real "
                 "judgment the skill asks for, not a policy constant. See "
@@ -1049,7 +1397,13 @@ def main() -> None:
                 + "."
             ),
             "tier_note": (
-                "Classified per task by the same judged run, NOT read from the "
+                f"Difficulty bucket per task from the rubric pass "
+                f"({judged_meta.get('bucketing')} bucketing); every model's "
+                "existing scores regrouped into bucket columns (easy, moderate, "
+                "hard, very hard shown as trivial, low, medium, high). The "
+                "dataset's own label is kept beside each row."
+                if judged_meta.get("mode") == "rubric"
+                else "Classified per task by the same judged run, NOT read from the "
                 "dataset. Each row carries the dataset's own `complexity` label "
                 "beside it so disagreement is visible."
                 if judged_meta

@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
@@ -201,6 +202,59 @@ class CloneIsolationTest(unittest.TestCase):
         self.assertEqual(len(seen), 3)
         self.assertEqual(len(set(seen)), 3, f"clone dirs collided: {seen}")
 
+    def test_two_passes_side_by_side_get_different_clone_parents(self) -> None:
+        # Two processes judging with different models clone the same task at
+        # the same attempt number; the process id keeps their folders apart.
+        seen: list[str] = []
+
+        class _FakeHarness:
+            @staticmethod
+            def _clone_repo(task, ref, clone_dir, log_prefix=""):
+                seen.append(clone_dir)
+                raise RuntimeError("stop here; the clone dir is what is under test")
+
+        class _Task:
+            id = "same-task"
+            problem_statement = "x"
+            repo = "https://example.com/r"
+
+        class _Dataset:
+            @staticmethod
+            def resolved_ref(task):
+                return "main"
+
+        class _Config:
+            clone_dir = "/tmp/router-test"  # nosec B108 - test fixture path
+
+        real = rr.HARNESS
+        rr.HARNESS = _FakeHarness
+        try:
+            for pid in (1111, 2222):
+                with mock.patch.object(rr.os, "getpid", return_value=pid):
+                    with self.assertRaises(RuntimeError):
+                        rr._judge_task(_Config(), _Dataset(), _Task(), 1, "l")
+        finally:
+            rr.HARNESS = real
+        self.assertEqual(len(set(seen)), 2, f"clone dirs collided: {seen}")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultOutTest(unittest.TestCase):
+    def _out(self, mode: str, scope: str | None) -> Path:
+        dataset = mock.Mock(output_scope=scope)
+        config = mock.Mock(model_slug="claude-opus-5-5")
+        return rr._default_out(mode, dataset, Path("dataset/some-set.yaml"), config)
+
+    def test_rubric_file_names_the_dataset_scope_and_judge(self) -> None:
+        out = self._out(rr.MODE_RUBRIC, "cli-cli-v1")
+        self.assertEqual(out.name, "swe-router-rubric-cli-cli-v1-claude-opus-5-5.json")
+
+    def test_rubric_file_falls_back_to_the_dataset_file_name(self) -> None:
+        out = self._out(rr.MODE_RUBRIC, None)
+        self.assertEqual(out.name, "swe-router-rubric-some-set-claude-opus-5-5.json")
+
+    def test_floor_mode_keeps_its_fixed_name(self) -> None:
+        self.assertEqual(self._out(rr.MODE_FLOOR, "cli-cli-v1"), rr.DEFAULT_FLOOR_OUT)

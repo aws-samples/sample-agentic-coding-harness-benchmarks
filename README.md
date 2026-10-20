@@ -52,7 +52,7 @@ One command per model. The `/benchmark` skill runs the pre-flight checks, the ha
 
 ## Step 2 — Developers install the skill
 
-Five files copied into a skills directory. The skill imports nothing and needs no build step. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
+Seven files copied into a skills directory. The skill needs `python3` 3.8 or later on PATH, with no packages and no build step; the installer refuses to run without it. Run this from the root of the repository you want it in, and it lands in `.claude/skills/swe-router`:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash
@@ -64,9 +64,9 @@ To install it once for every repository instead, send it to your home directory:
 curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-harness-benchmarks/main/vend/swe-router/install.sh | bash -s -- --dir ~/.claude/skills
 ```
 
-Re-run either command to upgrade; your edited `allowed-models.txt` is kept.
+Re-run either command to upgrade; your edited `allowed-models.txt` and `routing-policy.json` are kept.
 
-`swe-router` engages on its own before a substantial task. It sets a quality floor from what happens if the change is wrong, classifies how hard the task is, and takes the cheapest model that clears that floor at that tier. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
+`swe-router` engages on its own before a substantial task. Your assistant's model answers six rubric questions about the task: four set its difficulty bucket (easy, moderate, hard or very hard), and two set the quality a model must reach, from what happens if the change is wrong. The skill then takes the cheapest permitted model whose benchmark score in that bucket clears the bar, skipping any model that failed a benchmark task there. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
 
 Install notes, the file-by-file breakdown and the measured results: **[vend/swe-router/README.md](vend/swe-router/README.md)**.
 
@@ -118,7 +118,7 @@ Where to read more, by topic:
 | [docs/repository-structure.md](docs/repository-structure.md) | What lives where in this repository. |
 | [docs/diagrams/cost-quality-abstracted.html](docs/diagrams/cost-quality-abstracted.html) | Source for the cost/quality diagram above — a self-contained HTML page with the data inline. Edit and re-screenshot to regenerate. |
 | [.claude/skills/setup-machine/SKILL.md](.claude/skills/setup-machine/SKILL.md) | **Start here on a new machine.** What `/setup-machine` inspects and installs, why each component is needed, where the vLLM venv lands on a small root disk, and what it deliberately does not do. |
-| [.claude/skills/swe-router/SKILL.md](.claude/skills/swe-router/SKILL.md) | The `/swe-router` skill: how it sets a quality floor from the consequence of a change being wrong, picks the tier table to read it against, and selects the cheapest model that clears it. Advisory -- it recommends and stops. |
+| [vend/swe-router/SKILL.md](vend/swe-router/SKILL.md) | The `/swe-router` skill: the six rubric questions it answers about a task, how four of them set a difficulty bucket and two set the quality a model must reach, and how it then takes the cheapest permitted model that clears the bar in that bucket. Advisory -- it recommends and stops. |
 | [docs/vision.md](docs/vision.md) | The north star: a cost-aware harness that routes each task (and each phase) to the right model on the frontier -- frontier / workhorse / budget -- switching automatically. |
 | [benchmarks/README.md](benchmarks/README.md) | The benchmark harness landing page: the three hosting paths, how a run works, and how to reproduce the results above. |
 | [benchmarks/docs/harness-reference.md](benchmarks/docs/harness-reference.md) | Full harness reference: config, the `/swe2` flow, context-window/auto-compaction, and the LLM-as-judge scoring. |
