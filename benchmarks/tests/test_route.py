@@ -37,12 +37,16 @@ def _route(**kw):
 
 class NormalizeTest(unittest.TestCase):
     def test_strips_routing_and_packaging_from_names(self) -> None:
-        # Every one of these is closed-mid-gen5 wearing a different hat.
+        # Every one of these is closed-mid-gen5 wearing a different hat. One
+        # per rule in normalize(), because the model names these are standing
+        # in for are masked: without a case here, nothing exercises the rule.
         for name in (
             "closed-mid-gen5",
-            "us.vendor.closed-mid-gen5",
-            "vendor/closed-mid-gen5",
-            "us.vendor.closed-mid-gen5[1m]",
+            "us.vendor.closed-mid-gen5",  # region and vendor prefix
+            "vendor/closed-mid-gen5",  # provider prefix
+            "us.vendor.closed-mid-gen5[1m]",  # context-window hint
+            "us.vendor.closed-mid-gen5-20251001-v1:0",  # snapshot stamp
+            "Closed Mid Gen 5",  # a dropdown label: spaces and case
             "CLOSED_MID_GEN5",
         ):
             self.assertEqual(route.normalize(name), "closedmidgen5", name)
