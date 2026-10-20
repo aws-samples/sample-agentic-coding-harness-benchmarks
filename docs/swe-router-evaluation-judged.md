@@ -3,20 +3,20 @@
 > [!NOTE]
 > **This measures the previous router.** It scores the version that judged a quality floor and a complexity tier in prose. The skill now routes on the six-question rubric in [vend/swe-router/rubric.md](../vend/swe-router/rubric.md), which replaced that judgment because it was unstable -- the instability this page documents is what motivated the change. The caveats below still describe where the hard part lives; the numbers are not the current router's.
 
-> Across the 21 tasks the router selected **3 different models**: **Open dense 27B** 13x, **Closed frontier (gen 3)** 3x, **Open MoE 2.8T / 104B active** 1x. On 4 further task(s) nothing cleared the floor, so the skill's answer was to stay on the baseline.
+> Across the 21 tasks the router selected **3 different models**: **Open dense 27B** 13x, **Closed frontier (gen 5)** 3x, **Open MoE 2.8T / 104B active** 1x. On 4 further task(s) nothing cleared the floor, so the skill's answer was to stay on the baseline.
 >
-> Against running the **Closed frontier (gen 3)** model on everything, that cost **45.4% less** ($137.16 against $251.04) for a quality change of **-4.6%** (78.99 against 82.83 mean task score, -3.84 points).
+> Against running the **Closed frontier (gen 5)** model on everything, that cost **45.4% less** ($137.16 against $251.04) for a quality change of **-4.6%** (78.99 against 82.83 mean task score, -3.84 points).
 >
 > The saving is total-over-total, which is what lands on a bill. The mean of the per-task percentages is 60.6%, higher because it weights a cheap task the same as an expensive one.
 
-Replays the `swe-router` skill over all 21 tasks of `mcp-gateway-registry-v2`, then looks up what the model it picked ACTUALLY scored and cost on that task, against running the Closed frontier (gen 3) model on everything.
+Replays the `swe-router` skill over all 21 tasks of `mcp-gateway-registry-v2`, then looks up what the model it picked ACTUALLY scored and cost on that task, against running the Closed frontier (gen 5) model on everything.
 
 - **Sampling.** Leave-one-out: each task routes from tier means recomputed with that task excluded, so no pick knows the run it is scored against.
-- **Floor.** Judged per task by omp running the skill's step 1 against the cloned repo, driven by the same Closed frontier (gen 3) model used as the baseline -- the real judgment the skill asks for, not a policy constant. The floor and tier each task was judged to need are in the table below.
+- **Floor.** Judged per task by omp running the skill's step 1 against the cloned repo, driven by the same Closed frontier (gen 5) model used as the baseline -- the real judgment the skill asks for, not a policy constant. The floor and tier each task was judged to need are in the table below.
 - **Tier.** Classified per task by the same judged run, NOT read from the dataset. Each row carries the dataset's own `complexity` label beside it so disagreement is visible.
 - **Candidates.** 18 models the developer could select, with the organisational allow-list ignored (`--no-allow-list`). The full candidate set, with the measured score and cost behind each one, is the committed [`vend/swe-router/models.json`](../vend/swe-router/models.json).
 - **Cost basis.** Metered provider bills for Bedrock models; hardware-derived ($/token from the throughput sweep x tokens the server processed) for self-hosted ones. Mixing the two on one axis is directional -- see [cost-per-task-methodology.md](cost-per-task-methodology.md).
-- **Scoring.** `task_score` from the repo-grounded `openai.gpt-5.6-sol` judge. One run per task, so a per-task gap under ~3 points is noise.
+- **Scoring.** `task_score` from the repo-grounded `independent-closed-frontier` judge -- a closed frontier model from a different vendor to the models under test, named here by class like the rest. One run per task, so a per-task gap under ~3 points is noise.
 - **Runs.** omp harness, /swe3, measured 2026-09-08.
 
 A ⚠ marks a task where the model the router picked landed below the floor it was chosen to clear. That is the router getting it wrong, and the totals count it.
@@ -34,12 +34,12 @@ A ⚠ marks a task where the model the router picked landed below the floor it w
 | consistent-csrf-across-toggle-endpoints | high | 80 | _stay on the baseline_ | -- | 86.4 | 86.4 | +0.0 | $10.94 | $10.94 | +0% |
 | configurable-ui-title | medium | 75 | Open dense 27B | 77.72 | 83.6 | 83.2 | +0.4 | $0.84 | $10.35 | +92% |
 | configurable-mcp-proxy-upstream-timeout | medium | 70 | Open dense 27B | 77.76 | 83.4 | 79.2 | +4.2 | $0.74 | $10.12 | +93% |
-| nginx-location-trailing-slash-route-hijack | medium | 80 | Closed frontier (gen 3) | 82.04 | 80.4 | 80.4 | +0.0 | $9.22 | $9.22 | -0% |
+| nginx-location-trailing-slash-route-hijack | medium | 80 | Closed frontier (gen 5) | 82.04 | 80.4 | 80.4 | +0.0 | $9.22 | $9.22 | -0% |
 | registration-admission-control-gate | high | 80 | _stay on the baseline_ | -- | 81.8 | 81.8 | +0.0 | $13.29 | $13.29 | +0% |
 | server-side-oauth-token-storage | high | 75 | Open dense 27B | 77.27 | 54.0 ⚠ | 81.2 | -27.2 | $2.54 | $24.32 | +90% |
-| lifecycle-workflow-webhooks | high | 80 | Closed frontier (gen 3) | 80.25 | 77.8 ⚠ | 77.8 | +0.0 | $31.96 | $31.96 | -0% |
+| lifecycle-workflow-webhooks | high | 80 | Closed frontier (gen 5) | 80.25 | 77.8 ⚠ | 77.8 | +0.0 | $31.96 | $31.96 | -0% |
 | per-caller-per-target-rate-limits-and-quarantine | high | 80 | _stay on the baseline_ | -- | 81.0 | 81.0 | +0.0 | $31.69 | $31.69 | +0% |
-| idp-authenticated-embedding-endpoint | high | 80 | Closed frontier (gen 3) | 80.45 | 77.0 ⚠ | 77.0 | +0.0 | $18.10 | $18.10 | -0% |
+| idp-authenticated-embedding-endpoint | high | 80 | Closed frontier (gen 5) | 80.45 | 77.0 ⚠ | 77.0 | +0.0 | $18.10 | $18.10 | -0% |
 | index-demo-videos-in-one-page | low | 70 | Open dense 27B | 80.92 | 83.0 | 87.0 | -4.0 | $0.36 | $6.60 | +94% |
 | hide-register-button-on-virtual-and-skills-tabs | trivial | 70 | Open dense 27B | 81.05 | 82.8 | 86.4 | -3.6 | $0.44 | $3.98 | +89% |
 | pass-ssrf-allowlist-env-to-registry-container | trivial | 75 | Open dense 27B | 79.20 | 90.2 | 89.6 | +0.6 | $0.61 | $6.35 | +90% |
@@ -56,4 +56,4 @@ A ⚠ marks a task where the model the router picked landed below the floor it w
 | Tasks under floor | 7 | 4 | +3 |
 | Tasks failed outright | 0 | 0 | +0 |
 
-Models the router used: Closed frontier (gen 3), Open MoE 2.8T / 104B active, Open dense 27B.
+Models the router used: Closed frontier (gen 5), Open MoE 2.8T / 104B active, Open dense 27B.

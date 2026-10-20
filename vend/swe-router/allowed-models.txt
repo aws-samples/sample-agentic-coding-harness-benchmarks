@@ -1,10 +1,16 @@
 # Models this organisation permits, and that its coding agents can reach.
 #
+# NOTE ON NAMES: every model name in this file and in models.json is an
+# indicative placeholder, not a model you can select -- closed-source models
+# by tier and generation, open-weight models by parameter count and
+# dense/MoE architecture. The measurements are real; the names are not.
+# Replace them with the models you actually run, and see the README for
+# benchmarking your own repository to get results under real names.
+#
 # One model per line. Blank lines and anything after a # are ignored, so
 # annotate freely. Names are matched through model-aliases.json, so any
-# spelling your assistant uses will work: claude-sonnet-5,
-# us.anthropic.claude-sonnet-5 and Claude Sonnet 5 all resolve to the same
-# model.
+# spelling your assistant uses will work: open-dense-27b,
+# open_dense_27b and Open dense 27B all resolve to the same model.
 #
 # This list is a hard constraint. A model missing from it is never
 # recommended, whatever it scores. Delete this file and every model is
@@ -30,38 +36,41 @@
 # These five are the models on the measured cost/quality frontier: nothing
 # else scores at least as well for at most the cost, across the whole
 # 21-task benchmark. That is a defensible starting point and a poor
-# finished one, for two reasons.
+# finished one, for three reasons.
 #
-# One of the five, qwen3.8-27b, is self-hosted, and the shipped file cannot
-# know whether you serve it. If you do not, delete that line -- left in, it
-# will be recommended, and a developer on a hosted API will be told to
-# switch to a model they cannot select. The other four run on Amazon
-# Bedrock.
+# The first is the names: as above, they are placeholders. Nobody can select
+# a model called open-dense-27b, so this file does not work until you have
+# rewritten it against your own model list.
+#
+# One of the five, open-dense-27b, is also self-hosted, and the shipped file
+# cannot know whether you serve it. If you do not, delete that line -- left
+# in, it will be recommended, and a developer on a hosted API will be told to
+# switch to a model they cannot select. The other four are hosted.
 #
 # Frontier membership also comes from whole-dataset means, which is not the
-# ranking that decides a task. kimi-k3 is missing because claude-sonnet-5-5
-# beats it on average -- 79.49 to 79.17, at three fifths of the cost -- yet
-# kimi-k3 scores higher on trivial work (81.80 to 77.36). And the two
-# cheapest entries fall away on hard work: qwen3.8-27b drops to 71.45 and
-# claude-haiku-5-5 to 60.00 on high-complexity tasks, and each failed one
-# of the five.
+# ranking that decides a task. open-moe-2.8t-a104b is missing because
+# closed-mid-gen6 beats it on average -- 79.49 to 79.17, at three fifths of
+# the cost -- yet open-moe-2.8t-a104b scores higher on trivial work (81.80 to
+# 77.36). And the two cheapest entries fall away on hard work: open-dense-27b
+# drops to 71.45 and closed-efficient-gen6 to 60.00 on high-complexity tasks, and
+# each failed one of the five.
 #
 # So add the models your developers can actually reach. If you self-host,
-# these were on the frontier before the Claude 5.5 runs and remain the best
+# these were on the frontier before the gen-6 runs and remain the best
 # self-hosted value:
 #
-#   kimi-k3             # 79.17, $4.33/task, self-hosted.
-#   gemma-4-31b         # 59.74, $0.87/task, self-hosted.
-#   qwen3.6-35b         # 59.24, $0.26/task, self-hosted. Cheapest self-hosted.
+#   open-moe-2.8t-a104b  # 79.17, $4.33/task, self-hosted.
+#   open-dense-31b       # 59.74, $0.87/task, self-hosted.
+#   open-moe-35b-a3b     # 59.24, $0.26/task, self-hosted. Cheapest self-hosted.
 
-claude-opus-5           # 82.83, $11.95/task, Bedrock. Highest scoring measured.
-claude-opus-5-5         # 81.16, $4.44/task, Bedrock. Within 1.7 of the top at
+closed-frontier-gen5    # 82.83, $11.95/task, hosted. Highest scoring measured.
+closed-frontier-gen6    # 81.16, $4.44/task, hosted. Within 1.7 of the top at
                         # under two fifths of the price.
-claude-sonnet-5-5       # 79.49, $2.62/task, Bedrock. Highest on medium work
+closed-mid-gen6         # 79.49, $2.62/task, hosted. Highest on medium work
                         # (82.90) and finished all five hard tasks.
-qwen3.8-27b             # 78.48, $1.47/task, self-hosted. Drops to 71.45 on
+open-dense-27b          # 78.48, $1.47/task, self-hosted. Drops to 71.45 on
                         # high-complexity work and did not finish one of the
                         # five hard tasks.
-claude-haiku-5-5        # 72.69, $0.14/task, Bedrock. Cheapest measured by far,
+closed-efficient-gen6       # 72.69, $0.14/task, hosted. Cheapest measured by far,
                         # but 60.00 on high-complexity work, where it did not
                         # finish one of the five hard tasks.

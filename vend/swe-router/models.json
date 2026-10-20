@@ -1,6 +1,7 @@
 {
   "schema_version": "2.0",
   "generated_by": "benchmarks/scripts/build_vended_models.py",
+  "model_names": "Model names in this file are indicative placeholders, not the models that were run: closed-source models by tier and generation, open-weight models by parameter count and dense/MoE architecture. Generation numbers ascend with recency and are relative to this file, not a vendor's versioning. Every score, cost, completion count and flag is the measured value. Run the benchmark on your own repository to get results under real model names.",
   "provenance": {
     "measured_on": "2026-10-11",
     "source_file": "docs/metrics/pareto-frontier-omp-swe3.json",
@@ -9,14 +10,14 @@
     "skill": "swe3",
     "dataset": "mcp-gateway-registry-v2",
     "judge": {
-      "model": "openai.gpt-5.6-sol",
+      "model": "independent-closed-frontier",
       "reasoning_effort": "high",
       "repo_grounded": true
     },
     "rubric_scores": {
-      "file": "docs/metrics/swe-router-rubric-mcp-gateway-registry-v2-claude-opus-5-5.json",
+      "file": "docs/metrics/swe-router-rubric-mcp-gateway-registry-v2-<judge>.json",
       "sha256": "72ef0449b746",
-      "judge": "us.anthropic.claude-opus-5-5",
+      "judge": "closed-frontier-gen6",
       "repeats": 3,
       "buckets_recomputed_with": "vend/swe-router/routing-policy.json"
     },
@@ -36,7 +37,7 @@
   },
   "models": [
     {
-      "model": "claude-opus-5",
+      "model": "closed-frontier-gen5",
       "score": 82.83,
       "cost_per_task_usd": 11.9543,
       "hosting": "Bedrock",
@@ -69,7 +70,7 @@
       }
     },
     {
-      "model": "claude-opus-5-5",
+      "model": "closed-frontier-gen6",
       "score": 81.16,
       "cost_per_task_usd": 4.44,
       "hosting": "Bedrock",
@@ -102,7 +103,7 @@
       }
     },
     {
-      "model": "glm-5.3",
+      "model": "open-moe-743b-a39b",
       "score": 80.11,
       "cost_per_task_usd": 7.0397,
       "hosting": "self-hosted",
@@ -135,7 +136,7 @@
       }
     },
     {
-      "model": "claude-sonnet-5-5",
+      "model": "closed-mid-gen6",
       "score": 79.49,
       "cost_per_task_usd": 2.62,
       "hosting": "Bedrock",
@@ -168,7 +169,7 @@
       }
     },
     {
-      "model": "kimi-k3",
+      "model": "open-moe-2.8t-a104b",
       "score": 79.17,
       "cost_per_task_usd": 4.331,
       "hosting": "self-hosted",
@@ -201,7 +202,7 @@
       }
     },
     {
-      "model": "qwen3.8-27b",
+      "model": "open-dense-27b",
       "score": 78.48,
       "cost_per_task_usd": 1.4738,
       "hosting": "self-hosted",
@@ -236,7 +237,7 @@
       }
     },
     {
-      "model": "claude-sonnet-5",
+      "model": "closed-mid-gen5",
       "score": 76.97,
       "cost_per_task_usd": 4.6715,
       "hosting": "Bedrock",
@@ -269,7 +270,7 @@
       }
     },
     {
-      "model": "claude-opus-4-7",
+      "model": "closed-frontier-gen3",
       "score": 75.6,
       "cost_per_task_usd": 7.3514,
       "hosting": "Bedrock",
@@ -302,7 +303,7 @@
       }
     },
     {
-      "model": "claude-opus-4-8",
+      "model": "closed-frontier-gen4",
       "score": 74.69,
       "cost_per_task_usd": 5.32,
       "hosting": "Bedrock",
@@ -335,7 +336,7 @@
       }
     },
     {
-      "model": "kimi-k3-bedrock",
+      "model": "open-moe-2.8t-a104b-hosted",
       "score": 72.87,
       "cost_per_task_usd": 3.87,
       "hosting": "Bedrock",
@@ -368,7 +369,7 @@
       }
     },
     {
-      "model": "claude-haiku-5-5",
+      "model": "closed-efficient-gen6",
       "score": 72.69,
       "cost_per_task_usd": 0.14,
       "hosting": "Bedrock",
@@ -403,7 +404,7 @@
       }
     },
     {
-      "model": "claude-opus-4-6-v1",
+      "model": "closed-frontier-gen2",
       "score": 70.64,
       "cost_per_task_usd": 4.95,
       "hosting": "Bedrock",
@@ -436,7 +437,7 @@
       }
     },
     {
-      "model": "kimi-k2.7-code",
+      "model": "open-moe-1.06t-code",
       "score": 69.13,
       "cost_per_task_usd": 2.4709,
       "hosting": "self-hosted",
@@ -472,7 +473,7 @@
       }
     },
     {
-      "model": "claude-opus-4-5",
+      "model": "closed-frontier-gen1",
       "score": 66.32,
       "cost_per_task_usd": 4.18,
       "hosting": "Bedrock",
@@ -505,7 +506,7 @@
       }
     },
     {
-      "model": "deepseek-v3.2",
+      "model": "open-moe-685b-a37b",
       "score": 61.66,
       "cost_per_task_usd": 2.1485,
       "hosting": "self-hosted",
@@ -538,7 +539,7 @@
       }
     },
     {
-      "model": "minimax-m3",
+      "model": "open-moe-430b-vl",
       "score": 60.51,
       "cost_per_task_usd": 3.5108,
       "hosting": "self-hosted",
@@ -571,7 +572,7 @@
       }
     },
     {
-      "model": "gemma-4-31b",
+      "model": "open-dense-31b",
       "score": 59.74,
       "cost_per_task_usd": 0.8708,
       "hosting": "self-hosted",
@@ -604,7 +605,7 @@
       }
     },
     {
-      "model": "qwen3.6-35b",
+      "model": "open-moe-35b-a3b",
       "score": 59.24,
       "cost_per_task_usd": 0.2594,
       "hosting": "self-hosted",
@@ -637,7 +638,7 @@
       }
     },
     {
-      "model": "claude-haiku-4-5",
+      "model": "closed-efficient-gen1",
       "score": 56.18,
       "cost_per_task_usd": 0.7648,
       "hosting": "Bedrock",
@@ -670,7 +671,7 @@
       }
     },
     {
-      "model": "minimax-m2.5",
+      "model": "open-moe-230b-a10b",
       "score": 55.94,
       "cost_per_task_usd": 0.4765,
       "hosting": "self-hosted",
@@ -703,7 +704,7 @@
       }
     },
     {
-      "model": "devstral-2-123b",
+      "model": "open-dense-123b",
       "score": 51.15,
       "cost_per_task_usd": 0.7862,
       "hosting": "self-hosted",
@@ -742,7 +743,7 @@
       }
     },
     {
-      "model": "minicpm5-2b",
+      "model": "open-dense-2.5b",
       "score": 42.59,
       "cost_per_task_usd": 0.3993,
       "hosting": "self-hosted",
@@ -778,7 +779,7 @@
       }
     },
     {
-      "model": "qwen3-coder-30b",
+      "model": "open-moe-30b-a3b-code",
       "score": 42.58,
       "cost_per_task_usd": 0.4733,
       "hosting": "self-hosted",
