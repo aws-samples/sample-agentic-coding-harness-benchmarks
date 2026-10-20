@@ -112,7 +112,7 @@ Two flags carry most of the method:
 - `--holdout` routes each task from tier means recomputed with **that task excluded**. Without it the evaluation is in-sample: the skill builds `models.json` from these same 21 tasks, so it would score partly on data it has already seen. Leave-one-out gives the honest number. Run it in-sample and you get an upper bound.
 - `--no-allow-list` ignores the organisation's approved-model list, so the result measures routing rather than local policy. Drop it to see what the shipped allow-list permits.
 
-`--floor-sweep 55,65,70,75` replaces the judged floors with fixed ones, which shows how much the whole result depends on where the floor is set. Results and caveats: [Does routing beat picking one model?](../README.md#does-routing-beat-picking-one-model)
+`--floor-sweep 55,65,70,75` replaces the judged floors with fixed ones, which shows how much the whole result depends on where the floor is set. Results and caveats: [Does routing pay for itself?](../docs/swe-router-evaluation.md)
 
 ## Quick start
 

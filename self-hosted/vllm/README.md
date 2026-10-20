@@ -106,7 +106,7 @@ It runs the steps below, reports each one, and stops for you at the "inference w
 ### Option B — run the scripts by hand
 
 ```bash
-git clone https://github.com/aws-samples/sample-claude-code-multi-model ~/repo
+git clone https://github.com/aws-samples/sample-agentic-coding-harness-benchmarks ~/repo
 cd ~/repo/self-hosted/vllm/scripts
 
 ./vllm-install.sh      # driver check → apt deps → uv → venv → vLLM → monitoring → GPU check

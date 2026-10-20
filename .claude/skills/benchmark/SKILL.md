@@ -66,7 +66,7 @@ Do these in order. Do not skip the HF-token check; a missing token is the most c
 **2a. HuggingFace token must be available BEFORE starting vLLM.** `vllm-serve.sh` resolves a token from `$HF_TOKEN`, else a `.hf_token` file in the repo root, the `self-hosted/vllm/` dir, or `$HOME`. Check that at least one is present:
 
 ```bash
-cd ~/agentic-coding-harness-benchmarks
+cd ~/sample-agentic-coding-harness-benchmarks
 if [ -n "${HF_TOKEN:-}" ] || [ -s .hf_token ] || [ -s self-hosted/vllm/.hf_token ] || [ -s "$HOME/.hf_token" ]; then
   echo "HF token available"
 else
@@ -195,7 +195,7 @@ Run the end-to-end script from `benchmarks/`. It re-runs every pre-flight check 
 
 ```bash
 cd benchmarks
-./scripts/run-e2e-benchmark.sh --provider {provider} --model {model} --dataset {dataset} [--agent claude|pi|omp|codex|kiro] [--yes] [--count N] [--skip-judge]
+./scripts/run-e2e-benchmark.sh --provider {provider} --model {model} --dataset {dataset} [--agent claude|pi|omp|codex|kiro|strands|strands-harness] [--yes] [--count N] [--skip-judge]
 ```
 
 Tell the user, before it runs:
