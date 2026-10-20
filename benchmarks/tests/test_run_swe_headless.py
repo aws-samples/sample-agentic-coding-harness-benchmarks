@@ -15,6 +15,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import yaml
+
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
@@ -2122,3 +2124,93 @@ class StrandsRunTest(unittest.TestCase):
         self.assertEqual(
             (result["usage"]["input_tokens"], "log line" in logged), (7, True)
         )
+
+
+class ApiKeyEnvConsumedTest(unittest.TestCase):
+    """Every agent path must read api_key_env, not the literal api_key field.
+
+    runner_config validated api_key_env and then nothing consumed it, so the
+    documented safe pattern -- gateway token in an environment variable, out of
+    the committed config -- silently authenticated as the placeholder "local".
+    """
+
+    ENV = "TEST_GATEWAY_TOKEN"
+    SECRET = "sk-real-gateway-token"
+
+    def _config(self, **kw):
+        return _config(api_key_env=self.ENV, **kw)
+
+    def test_claude_env_uses_the_environment_variable(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_env(self._config())
+        self.assertEqual(env["ANTHROPIC_API_KEY"], self.SECRET)
+
+    def test_claude_settings_json_uses_it_in_both_places(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            settings = json.loads(harness._build_settings_arg(self._config()))
+        self.assertEqual(settings["env"]["ANTHROPIC_API_KEY"], self.SECRET)
+        self.assertEqual(settings["apiKeyHelper"], f"echo {self.SECRET}")
+
+    def test_codex_env_uses_it(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_codex_env(self._config(agent="codex"))
+        self.assertEqual(env["OPENAI_API_KEY"], self.SECRET)
+
+    def test_strands_env_uses_it(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_strands_env(self._config(agent="strands"))
+        self.assertEqual(env["STRANDS_API_KEY"], self.SECRET)
+
+    def test_pi_models_json_uses_it_and_is_owner_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, {self.ENV: self.SECRET}),
+        ):
+            agent_dir = Path(d)
+            harness._write_pi_models_json(self._config(agent="pi"), agent_dir)
+            path = agent_dir / "models.json"
+            blob = json.loads(path.read_text(encoding="utf-8"))
+            mode = path.stat().st_mode & 0o777
+        key = blob["providers"]["vllm"]["apiKey"]
+        self.assertEqual((key, mode), (self.SECRET, 0o600))
+
+    def test_omp_models_yml_uses_it_and_is_owner_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, {self.ENV: self.SECRET}),
+        ):
+            agent_dir = Path(d)
+            harness._write_omp_config(self._config(agent="omp"), agent_dir)
+            path = agent_dir / "models.yml"
+            blob = yaml.safe_load(path.read_text(encoding="utf-8"))
+            mode = path.stat().st_mode & 0o777
+        key = blob["providers"]["vllm"]["apiKey"]
+        self.assertEqual((key, mode), (self.SECRET, 0o600))
+
+
+class DisplayConfigTest(unittest.TestCase):
+    """--dry-run prints the claude command, whose inline settings hold the key."""
+
+    def test_a_real_key_never_reaches_the_built_command(self) -> None:
+        secret = "sk-secret-value"
+        with mock.patch.dict(os.environ, {"TOK": secret}):
+            config = _config(api_key_env="TOK")
+            # Sanity: the real config does resolve the secret.
+            self.assertEqual(config.resolved_api_key(), secret)
+            safe = harness._display_config(config)
+            cmd = " ".join(
+                harness._build_claude_cmd(safe, "p", clone_path=Path("/tmp"))
+            )
+        self.assertNotIn(secret, cmd)
+        self.assertEqual(safe.resolved_api_key(), "local")
+
+    def test_api_key_env_is_cleared_not_just_the_literal(self) -> None:
+        # Leaving api_key_env set would send resolved_api_key() back to the
+        # environment and hand the real token straight back.
+        with mock.patch.dict(os.environ, {"TOK": "sk-secret-value"}):
+            safe = harness._display_config(_config(api_key_env="TOK"))
+        self.assertIsNone(safe.api_key_env)
+
+    def test_bedrock_config_is_returned_unchanged(self) -> None:
+        config = _config(provider="bedrock", aws_region="us-west-2", endpoint=None)
+        self.assertIs(harness._display_config(config), config)
