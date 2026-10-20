@@ -33,6 +33,14 @@ curl -sL -O https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-
 less install.sh && bash install.sh
 ```
 
+> [!IMPORTANT]
+> **The shipped data is illustrative, so a fresh install cannot yet recommend a model you can switch to.** Two things follow from the placeholder names above, and both are fixed the same way.
+>
+> 1. The model it names will be something like `closed-mid-gen6`, which is not a model anyone can select.
+> 2. A real id your assistant offers -- `claude-opus-5-5`, `us.anthropic.claude-sonnet-5-5`, `qwen3.8-27b` -- will not match the shipped list, so passing one yields `no_candidates` rather than a recommendation.
+>
+> Point it at your own measurements and both go away: run the benchmark ([Step 1](../../README.md#step-1--benchmark-and-get-a-frontier)), regenerate `models.json` with [`build_vended_models.py`](../../benchmarks/scripts/build_vended_models.py) -- the generator emits REAL ids, it is only this committed copy that is masked -- and set `allowed-models.txt` to what your team can reach. The routing rules, the rubric and the thresholds are all real and need no change; it is the model table underneath them that has to become yours.
+
 Seven files land in the skill directory:
 
 | File | |

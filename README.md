@@ -68,6 +68,9 @@ curl -sL https://raw.githubusercontent.com/aws-samples/sample-agentic-coding-har
 
 Re-run either command to upgrade; your edited `allowed-models.txt` and `routing-policy.json` are kept.
 
+> [!IMPORTANT]
+> **Install it to see the mechanism; run Step 1 before you act on it.** The data that ships with the skill carries placeholder model names, so the model it names out of the box -- `closed-mid-gen6`, say -- is not a model anyone can switch to, and a real model id your assistant offers will not match the shipped list. Regenerate `models.json` from your own Step 1 run with [`build_vended_models.py`](benchmarks/scripts/build_vended_models.py), which emits real ids, and edit `allowed-models.txt` to the models your team can actually reach. Until then the skill demonstrates the routing rules on illustrative figures rather than recommending something actionable.
+
 `swe-router` engages on its own before a substantial task. Your assistant's model answers six rubric questions about the task: four set its difficulty bucket (easy, moderate, hard or very hard), and two set the quality a model must reach, from what happens if the change is wrong. The skill then takes the cheapest permitted model whose benchmark score in that bucket clears the bar, skipping any model that failed a benchmark task there. **Edit `allowed-models.txt`.** The skill treats every name in it as a model the developer can select, so listing one your team cannot reach costs them the cheaper option.
 
 Install notes, the file-by-file breakdown and the measured results: **[vend/swe-router/README.md](vend/swe-router/README.md)**.
