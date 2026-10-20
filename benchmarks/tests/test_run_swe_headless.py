@@ -2188,22 +2188,29 @@ class ApiKeyEnvConsumedTest(unittest.TestCase):
         self.assertEqual((key, mode), (self.SECRET, 0o600))
 
 
-class RedactApiKeyTest(unittest.TestCase):
+class DisplayConfigTest(unittest.TestCase):
     """--dry-run prints the claude command, whose inline settings hold the key."""
 
-    def test_a_real_key_is_redacted(self) -> None:
-        with mock.patch.dict(os.environ, {"TOK": "sk-secret-value"}):
+    def test_a_real_key_never_reaches_the_built_command(self) -> None:
+        secret = "sk-secret-value"
+        with mock.patch.dict(os.environ, {"TOK": secret}):
             config = _config(api_key_env="TOK")
-            out = harness._redact_api_key("run --key sk-secret-value now", config)
-        self.assertEqual(out, "run --key ***REDACTED*** now")
+            # Sanity: the real config does resolve the secret.
+            self.assertEqual(config.resolved_api_key(), secret)
+            safe = harness._display_config(config)
+            cmd = " ".join(
+                harness._build_claude_cmd(safe, "p", clone_path=Path("/tmp"))
+            )
+        self.assertNotIn(secret, cmd)
+        self.assertEqual(safe.resolved_api_key(), "local")
 
-    def test_the_local_placeholder_is_left_alone(self) -> None:
-        # Blanking "local" would also mangle paths like ~/.local/bin.
-        config = _config()
-        text = "PATH=~/.local/bin --key local"
-        self.assertEqual(harness._redact_api_key(text, config), text)
+    def test_api_key_env_is_cleared_not_just_the_literal(self) -> None:
+        # Leaving api_key_env set would send resolved_api_key() back to the
+        # environment and hand the real token straight back.
+        with mock.patch.dict(os.environ, {"TOK": "sk-secret-value"}):
+            safe = harness._display_config(_config(api_key_env="TOK"))
+        self.assertIsNone(safe.api_key_env)
 
-    def test_bedrock_runs_have_no_key_to_redact(self) -> None:
+    def test_bedrock_config_is_returned_unchanged(self) -> None:
         config = _config(provider="bedrock", aws_region="us-west-2", endpoint=None)
-        text = "anything at all"
-        self.assertEqual(harness._redact_api_key(text, config), text)
+        self.assertIs(harness._display_config(config), config)

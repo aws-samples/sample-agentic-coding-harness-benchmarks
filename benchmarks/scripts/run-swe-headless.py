@@ -3477,37 +3477,40 @@ def _select_tasks(dataset: Dataset, task_ids: list[str], count: int = 0) -> list
     return selected[:count] if count else selected
 
 
-def _redact_api_key(text: str, config: RunnerConfig) -> str:
-    """Hide the endpoint API key in text about to be printed.
+def _display_config(config: RunnerConfig) -> RunnerConfig:
+    """Return ``config`` with the endpoint credential replaced by the placeholder.
 
-    The claude command carries its settings as an inline JSON argument, and that
-    JSON holds ``ANTHROPIC_API_KEY``. Printing the command verbatim is harmless
-    while the key is the ``local`` placeholder a self-hosted vLLM server ignores,
-    but it leaks a real credential once ``api_key_env`` points at a gateway
-    token, and dry-run output routinely gets redirected to a file or pasted into
-    a ticket.
+    ``--dry-run`` prints the agent command, and the claude command carries its
+    settings as an inline JSON argument holding ``ANTHROPIC_API_KEY``. Dry-run
+    output routinely gets redirected to a file or pasted into a ticket, so a real
+    gateway token must not reach it.
 
-    The placeholder is deliberately not redacted: it is not a secret, and
-    blanking the string ``local`` would also mangle ordinary paths such as
-    ``~/.local/bin``.
+    The command is therefore BUILT from this copy rather than built with the
+    secret and scrubbed afterwards. Scrubbing output is the weaker of the two:
+    it has to find every rendering of the secret in the finished string, and a
+    key that gets split, escaped or re-encoded by one of the builders survives
+    it. Here there is nothing to find, because the value was never the secret.
+
+    Clearing ``api_key_env`` as well matters: leaving it set would send
+    ``resolved_api_key()`` back to the environment for the real token.
 
     Args:
-        text: The text about to be printed.
-        config: The runner config, for the key and the routing mode.
+        config: The run's real configuration.
 
     Returns:
-        The text with any real API key replaced.
+        A copy safe to build printable commands from. Bedrock and kiro runs have
+        no endpoint credential, so they are returned unchanged.
     """
     if config.is_bedrock or config.is_kiro:
-        return text
-    secret = config.resolved_api_key()
-    if not secret or secret == DEFAULT_API_KEY:
-        return text
-    return text.replace(secret, "***REDACTED***")
+        return config
+    return config.model_copy(update={"api_key": DEFAULT_API_KEY, "api_key_env": None})
 
 
 def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
     """Print the prompt and command for each task without executing anything."""
+    # Commands below are built from this copy, so no real credential is ever
+    # rendered into the printed text (see _display_config).
+    config = _display_config(config)
     for task in tasks:
         ref = dataset.resolved_ref(task)
         placeholder = (
@@ -3540,7 +3543,7 @@ def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
         print("PROMPT:")
         print(prompt)
         print("\nCOMMAND:")
-        print(_redact_api_key(" ".join(cmd), config))
+        print(" ".join(cmd))
 
 
 def _summary_is_retryable(summary: dict[str, Any]) -> bool:
