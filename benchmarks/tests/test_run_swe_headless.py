@@ -15,6 +15,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import yaml
+
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
@@ -2122,3 +2124,86 @@ class StrandsRunTest(unittest.TestCase):
         self.assertEqual(
             (result["usage"]["input_tokens"], "log line" in logged), (7, True)
         )
+
+
+class ApiKeyEnvConsumedTest(unittest.TestCase):
+    """Every agent path must read api_key_env, not the literal api_key field.
+
+    runner_config validated api_key_env and then nothing consumed it, so the
+    documented safe pattern -- gateway token in an environment variable, out of
+    the committed config -- silently authenticated as the placeholder "local".
+    """
+
+    ENV = "TEST_GATEWAY_TOKEN"
+    SECRET = "sk-real-gateway-token"
+
+    def _config(self, **kw):
+        return _config(api_key_env=self.ENV, **kw)
+
+    def test_claude_env_uses_the_environment_variable(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_env(self._config())
+        self.assertEqual(env["ANTHROPIC_API_KEY"], self.SECRET)
+
+    def test_claude_settings_json_uses_it_in_both_places(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            settings = json.loads(harness._build_settings_arg(self._config()))
+        self.assertEqual(settings["env"]["ANTHROPIC_API_KEY"], self.SECRET)
+        self.assertEqual(settings["apiKeyHelper"], f"echo {self.SECRET}")
+
+    def test_codex_env_uses_it(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_codex_env(self._config(agent="codex"))
+        self.assertEqual(env["OPENAI_API_KEY"], self.SECRET)
+
+    def test_strands_env_uses_it(self) -> None:
+        with mock.patch.dict(os.environ, {self.ENV: self.SECRET}):
+            env = harness._build_strands_env(self._config(agent="strands"))
+        self.assertEqual(env["STRANDS_API_KEY"], self.SECRET)
+
+    def test_pi_models_json_uses_it_and_is_owner_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, {self.ENV: self.SECRET}),
+        ):
+            agent_dir = Path(d)
+            harness._write_pi_models_json(self._config(agent="pi"), agent_dir)
+            path = agent_dir / "models.json"
+            blob = json.loads(path.read_text(encoding="utf-8"))
+            mode = path.stat().st_mode & 0o777
+        key = blob["providers"]["vllm"]["apiKey"]
+        self.assertEqual((key, mode), (self.SECRET, 0o600))
+
+    def test_omp_models_yml_uses_it_and_is_owner_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, {self.ENV: self.SECRET}),
+        ):
+            agent_dir = Path(d)
+            harness._write_omp_config(self._config(agent="omp"), agent_dir)
+            path = agent_dir / "models.yml"
+            blob = yaml.safe_load(path.read_text(encoding="utf-8"))
+            mode = path.stat().st_mode & 0o777
+        key = blob["providers"]["vllm"]["apiKey"]
+        self.assertEqual((key, mode), (self.SECRET, 0o600))
+
+
+class RedactApiKeyTest(unittest.TestCase):
+    """--dry-run prints the claude command, whose inline settings hold the key."""
+
+    def test_a_real_key_is_redacted(self) -> None:
+        with mock.patch.dict(os.environ, {"TOK": "sk-secret-value"}):
+            config = _config(api_key_env="TOK")
+            out = harness._redact_api_key("run --key sk-secret-value now", config)
+        self.assertEqual(out, "run --key ***REDACTED*** now")
+
+    def test_the_local_placeholder_is_left_alone(self) -> None:
+        # Blanking "local" would also mangle paths like ~/.local/bin.
+        config = _config()
+        text = "PATH=~/.local/bin --key local"
+        self.assertEqual(harness._redact_api_key(text, config), text)
+
+    def test_bedrock_runs_have_no_key_to_redact(self) -> None:
+        config = _config(provider="bedrock", aws_region="us-west-2", endpoint=None)
+        text = "anything at all"
+        self.assertEqual(harness._redact_api_key(text, config), text)

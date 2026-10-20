@@ -47,6 +47,7 @@ import yaml
 from bedrock_pricing import cost_usd as _bedrock_cost_usd
 from dataset_loader import Dataset, DatasetError, Task, load_dataset
 from runner_config import (
+    DEFAULT_API_KEY,
     RunnerConfig,
     RunnerConfigError,
     load_runner_config,
@@ -402,7 +403,7 @@ def _build_env(config: RunnerConfig) -> dict[str, str]:
         env.pop("ANTHROPIC_BASE_URL", None)
     else:
         env["ANTHROPIC_BASE_URL"] = config.endpoint
-        env["ANTHROPIC_API_KEY"] = config.api_key
+        env["ANTHROPIC_API_KEY"] = config.resolved_api_key()
         env["CLAUDE_CODE_USE_BEDROCK"] = "0"
     return env
 
@@ -446,10 +447,11 @@ def _build_settings_arg(config: RunnerConfig) -> str:
         if config.auto_compact_window is not None:
             env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(config.auto_compact_window)
         return json.dumps({"env": env})
+    api_key = config.resolved_api_key()
     endpoint_env = {
         "CLAUDE_CODE_USE_BEDROCK": "0",
         "ANTHROPIC_BASE_URL": config.endpoint,
-        "ANTHROPIC_API_KEY": config.api_key,
+        "ANTHROPIC_API_KEY": api_key,
         "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(config.max_output_tokens),
         "CLAUDE_CODE_SUBAGENT_MODEL": config.model,
@@ -463,7 +465,7 @@ def _build_settings_arg(config: RunnerConfig) -> str:
     settings = {
         # Claude Code requires a token source even against a local endpoint that
         # ignores the value; without it the run fails with "Not logged in".
-        "apiKeyHelper": f"echo {config.api_key}",
+        "apiKeyHelper": f"echo {api_key}",
         "env": endpoint_env,
     }
     return json.dumps(settings)
@@ -543,7 +545,7 @@ def _write_pi_models_json(config: RunnerConfig, agent_dir: Path) -> None:
             "vllm": {
                 "baseUrl": base_url,
                 "api": "openai-completions",
-                "apiKey": config.api_key,
+                "apiKey": config.resolved_api_key(),
                 "compat": {
                     "supportsDeveloperRole": False,
                     "supportsReasoningEffort": False,
@@ -568,9 +570,12 @@ def _write_pi_models_json(config: RunnerConfig, agent_dir: Path) -> None:
         }
     }
     agent_dir.mkdir(parents=True, exist_ok=True)
-    (agent_dir / "models.json").write_text(
-        json.dumps(models_json, indent=2) + "\n", encoding="utf-8"
-    )
+    models_path = agent_dir / "models.json"
+    models_path.write_text(json.dumps(models_json, indent=2) + "\n", encoding="utf-8")
+    # This file holds the endpoint's apiKey, which is a real token whenever
+    # api_key_env points at a gateway credential. The default umask would leave
+    # it group- and world-readable, so restrict it to the owner.
+    models_path.chmod(0o600)
     _write_pi_settings(config, agent_dir)
 
 
@@ -638,7 +643,7 @@ def _write_omp_config(config: RunnerConfig, agent_dir: Path) -> None:
             OMP_PROVIDER_VLLM: {
                 "baseUrl": base_url,
                 "api": "openai-completions",
-                "apiKey": config.api_key,
+                "apiKey": config.resolved_api_key(),
                 "models": [
                     {
                         "id": config.model,
@@ -661,9 +666,13 @@ def _write_omp_config(config: RunnerConfig, agent_dir: Path) -> None:
     threshold = max(window - (config.max_output_tokens + 8192), 1)
     config_yml = {"compaction": {"enabled": True, "thresholdTokens": threshold}}
     agent_dir.mkdir(parents=True, exist_ok=True)
-    (agent_dir / "models.yml").write_text(
+    models_path = agent_dir / "models.yml"
+    models_path.write_text(
         yaml.safe_dump(models_yml, sort_keys=False), encoding="utf-8"
     )
+    # Holds the endpoint's apiKey, a real token whenever api_key_env points at a
+    # gateway credential, so keep it owner-only rather than umask-default.
+    models_path.chmod(0o600)
     (agent_dir / "config.yml").write_text(
         yaml.safe_dump(config_yml, sort_keys=False), encoding="utf-8"
     )
@@ -2069,7 +2078,11 @@ def _build_codex_env(config: RunnerConfig) -> dict[str, str]:
             env["AWS_REGION"] = region
     else:
         env["OPENAI_BASE_URL"] = (config.endpoint or "").rstrip("/") + "/v1"
-        env["OPENAI_API_KEY"] = config.api_key or "local"
+        # resolved_api_key() honours api_key_env, so a real gateway token can come
+        # from the environment instead of the config file. Reading config.api_key
+        # directly here would send the "local" placeholder to a gateway that needs
+        # a genuine credential.
+        env["OPENAI_API_KEY"] = config.resolved_api_key() or "local"
     return env
 
 
@@ -3464,6 +3477,35 @@ def _select_tasks(dataset: Dataset, task_ids: list[str], count: int = 0) -> list
     return selected[:count] if count else selected
 
 
+def _redact_api_key(text: str, config: RunnerConfig) -> str:
+    """Hide the endpoint API key in text about to be printed.
+
+    The claude command carries its settings as an inline JSON argument, and that
+    JSON holds ``ANTHROPIC_API_KEY``. Printing the command verbatim is harmless
+    while the key is the ``local`` placeholder a self-hosted vLLM server ignores,
+    but it leaks a real credential once ``api_key_env`` points at a gateway
+    token, and dry-run output routinely gets redirected to a file or pasted into
+    a ticket.
+
+    The placeholder is deliberately not redacted: it is not a secret, and
+    blanking the string ``local`` would also mangle ordinary paths such as
+    ``~/.local/bin``.
+
+    Args:
+        text: The text about to be printed.
+        config: The runner config, for the key and the routing mode.
+
+    Returns:
+        The text with any real API key replaced.
+    """
+    if config.is_bedrock or config.is_kiro:
+        return text
+    secret = config.resolved_api_key()
+    if not secret or secret == DEFAULT_API_KEY:
+        return text
+    return text.replace(secret, "***REDACTED***")
+
+
 def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
     """Print the prompt and command for each task without executing anything."""
     for task in tasks:
@@ -3498,7 +3540,7 @@ def _dry_run(config: RunnerConfig, dataset: Dataset, tasks: list[Task]) -> None:
         print("PROMPT:")
         print(prompt)
         print("\nCOMMAND:")
-        print(" ".join(cmd))
+        print(_redact_api_key(" ".join(cmd), config))
 
 
 def _summary_is_retryable(summary: dict[str, Any]) -> bool:
@@ -4048,6 +4090,12 @@ def _parse_args() -> argparse.Namespace:
         "for native Amazon Bedrock)",
     )
     parser.add_argument("--endpoint", help="Override: API endpoint base URL")
+    parser.add_argument(
+        "--api-key-env",
+        help="Override: name of the environment variable holding the endpoint's "
+        "API key. Wins over the config's api_key, so a real gateway token never "
+        "has to sit in a committed config file.",
+    )
     parser.add_argument("--model", help="Override: model name")
     parser.add_argument(
         "--aws-region",
@@ -4154,6 +4202,7 @@ def main() -> None:
         "skill": args.skill,
         "provider": args.provider,
         "endpoint": args.endpoint,
+        "api_key_env": args.api_key_env,
         "model": args.model,
         "aws_region": args.aws_region,
         "instance_type": args.instance_type,
