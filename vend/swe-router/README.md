@@ -4,9 +4,11 @@ A skill that tells you which model to switch your coding assistant to, based on 
 
 It recommends and stops. It does not run your task, change a setting, or write code.
 
+> **Model names in this copy are indicative placeholders, not the models that were run.** Closed-source models are named by tier and generation (`closed-frontier-gen5`, `closed-mid-gen6`), open-weight models by parameter count and dense/MoE architecture (`open-moe-743b-a39b`, `open-dense-27b`). Generation numbers ascend with recency and are relative to this file, not any vendor's versioning. Every score, cost, completion count and frontier flag is the measured value from the run — only the names are substituted. Because nothing here names a model you can actually select, **run the benchmark on your own repository to get results under real model names**; see [Regenerating the data](#regenerating-the-data).
+
 ## Why it exists
 
-Most developers pick the strongest model and leave it there. That is a defensible default and an expensive one. On the benchmark behind this skill, `claude-sonnet-5` lands within 5 points of `claude-opus-5` on **10 of 21 tasks** at **61% lower cost per task**, and matches or beats it outright on 5 of them.
+Most developers pick the strongest model and leave it there. That is a defensible default and an expensive one. On the benchmark behind this skill, `closed-mid-gen5` lands within 5 points of `closed-frontier-gen5` on **10 of 21 tasks** at **61% lower cost per task**, and matches or beats it outright on 5 of them.
 
 Knowing which tasks those are needs measurement. This skill carries the measurements.
 
@@ -49,7 +51,7 @@ The path differs by assistant, which is what `--dir` is for. The skill has no ot
 
 ### Restricting it to models your organisation allows
 
-`allowed-models.txt` ships with the skill, allowing the five models on the measured frontier. **Edit it.** As written it is a starting point, not a policy: one of those five, `qwen3.8-27b`, is self-hosted, and if you do not serve it the skill will recommend a model nobody can select. The file says so at the top and lists what to add.
+`allowed-models.txt` ships with the skill, allowing the five models on the measured frontier. **Edit it.** As written it is a starting point, not a policy: one of those five, `open-dense-27b`, is self-hosted, and if you do not serve it the skill will recommend a model nobody can select. The file says so at the top and lists what to add.
 
 The file is also the candidate set, not just a filter. The skill treats every entry as a model the developer can actually select, and does not inspect the agent's model picker or provider config to check — a model reached through a proxy or driven by a second agent is invisible to that kind of check, so second-guessing the list mostly costs developers the cheaper option. That puts the whole promise on whoever maintains the file: **list a model and a developer can select it; if they cannot reach it, it does not belong on the list.**
 
@@ -81,13 +83,15 @@ If it is firing when you do not want it, narrow the `Run it BEFORE…` sentence 
 
 ### Read these caveats before you trust a number
 
+**The names are placeholders.** As the note at the top says, no `model` value in `models.json` identifies a real model: closed-source entries carry a tier and a generation, open-weight entries a parameter count and an architecture. That is enough to tell you the class of model a recommendation points at, and the hardware an open-weight one would need, and it is not enough to switch to. The numbers beside each name are the measured ones. Run the benchmark on your own repository to get the same table under real model names.
+
 **One repository.** Every task comes from a Python/FastAPI and React service with nginx, Terraform, Helm and bash around it. Rankings travel better than absolute scores. If you write Rust game engines, treat the ordering as a starting point and the numbers as indicative.
 
 **One run per model per task, 2 to 10 per bucket.** Small differences are noise. In the earlier per-tier analysis, dropping a single task from a tier of five or six reversed the order of two models 82% of the time when they sat within 1 point of each other, 53% within 2, and 47% within 3, but only 5% past 5 points and never past 8. The skill treats anything under 3 points as a tie and takes the cheaper model. The moderate bucket holds only 2 tasks; read its column as a rough guide.
 
 **Self-hosted costs are measured under load.** Hosted figures come from a metered bill. Self-hosted figures come from the server's hourly price divided by throughput measured at a stated concurrency — a platform team serving a group of developers, not one person with an idle GPU. Both are a cost per task, and the skill ranks them together.
 
-**These numbers move.** A fix to token accounting once changed `claude-opus-5` from $7.63 to $11.95 per task while every score stayed identical. Check `provenance.measured_on`, the date of the newest run in the file, and refetch if it looks old. `provenance.source_sha256` identifies the exact data: it is the first 12 hex digits of the SHA-256 of the frontier file it was built from, so two copies with the same value hold the same numbers.
+**These numbers move.** A fix to token accounting once changed `closed-frontier-gen5` from $7.63 to $11.95 per task while every score stayed identical. Check `provenance.measured_on`, the date of the newest run in the file, and refetch if it looks old. `provenance.source_sha256` identifies the exact data: it is the first 12 hex digits of the SHA-256 of the frontier file it was built from, so two copies with the same value hold the same numbers.
 
 ## How it decides
 
@@ -135,9 +139,9 @@ How hard a task is and how bad a mistake would be are different questions. A one
 
 ### Why difficulty picks the column
 
-Models lose points at different rates as tasks get harder, and some start failing them. On the benchmark, `claude-haiku-5-5` scores 83.2 on moderate tasks and 65.3 on very hard ones, with one very hard task unfinished. `claude-sonnet-5-5` drops from 86.5 to 77.2 and finishes all of them. An overall mean hides both facts.
+Models lose points at different rates as tasks get harder, and some start failing them. On the benchmark, `closed-efficient-gen6` scores 83.2 on moderate tasks and 65.3 on very hard ones, with one very hard task unfinished. `closed-mid-gen6` drops from 86.5 to 77.2 and finishes all of them. An overall mean hides both facts.
 
-Each benchmark task got its bucket from the same six questions, answered three times by Claude Opus 5.5, so "hard" means the same thing in the column and in your request. The rubric scores live in the benchmark repository, in `docs/metrics/swe-router-rubric-<dataset>-<judge>.json`; the skill never reads them, only the columns built from them.
+Each benchmark task got its bucket from the same six questions, answered three times by `closed-frontier-gen6`, so "hard" means the same thing in the column and in your request. The rubric scores live in the benchmark repository, in `docs/metrics/swe-router-rubric-<dataset>-<judge>.json`; the skill never reads them, only the columns built from them.
 
 ### Why a failure skips a model
 
@@ -149,29 +153,29 @@ Every measured model, cheapest first. A fraction marks a bucket where the model 
 
 | Model | $/task | moderate (2 tasks) | hard (10) | very hard (9) |
 |---|---:|---:|---:|---:|
-| `claude-haiku-5-5` | 0.14 | 83.2 | 76.5 | 65.3 (8/9) |
-| `qwen3.6-35b` | 0.26 | 62.6 | 62.3 | 55.1 |
-| `minicpm5-2b` | 0.40 | 42.6 | 47.2 (9/10) | 37.4 (8/9) |
-| `qwen3-coder-30b` | 0.47 | 52.4 | 45.4 | 37.2 |
-| `minimax-m2.5` | 0.48 | 58.9 | 58.2 | 52.7 |
-| `claude-haiku-4-5` | 0.76 | 62.7 | 57.0 | 53.8 |
-| `devstral-2-123b` | 0.79 | 65.7 | 55.2 (6/10) | 44.5 (8/9) |
-| `gemma-4-31b` | 0.87 | 68.6 | 63.0 | 54.2 |
-| `qwen3.8-27b` | 1.47 | 83.6 | 81.3 | 73.6 (8/9) |
-| `deepseek-v3.2` | 2.15 | 66.7 | 64.9 | 56.9 |
-| `kimi-k2.7-code` | 2.47 | 79.9 | 71.9 | 62.1 (7/9) |
-| `claude-sonnet-5-5` | 2.62 | 86.5 | 80.1 | 77.2 |
-| `minimax-m3` | 3.51 | 74.3 | 60.9 | 57.0 |
-| `kimi-k3-bedrock` | 3.87 | 83.6 | 73.1 | 70.2 |
-| `claude-opus-4-5` | 4.18 | 68.0 | 70.9 | 60.9 |
-| `kimi-k3` | 4.33 | 84.8 | 81.0 | 75.9 |
-| `claude-opus-5-5` | 4.44 | 89.7 | 80.4 | 80.2 |
-| `claude-sonnet-5` | 4.67 | 81.8 | 78.1 | 74.6 |
-| `claude-opus-4-6-v1` | 4.95 | 78.8 | 73.8 | 65.3 |
-| `claude-opus-4-8` | 5.32 | 81.1 | 74.9 | 73.0 |
-| `glm-5.3` | 7.04 | 86.8 | 81.0 | 77.7 |
-| `claude-opus-4-7` | 7.35 | 81.0 | 76.5 | 73.4 |
-| `claude-opus-5` | 11.95 | 87.4 | 84.3 | 80.2 |
+| `closed-efficient-gen6` | 0.14 | 83.2 | 76.5 | 65.3 (8/9) |
+| `open-moe-35b-a3b` | 0.26 | 62.6 | 62.3 | 55.1 |
+| `open-dense-2.5b` | 0.40 | 42.6 | 47.2 (9/10) | 37.4 (8/9) |
+| `open-moe-30b-a3b-code` | 0.47 | 52.4 | 45.4 | 37.2 |
+| `open-moe-230b-a10b` | 0.48 | 58.9 | 58.2 | 52.7 |
+| `closed-efficient-gen1` | 0.76 | 62.7 | 57.0 | 53.8 |
+| `open-dense-123b` | 0.79 | 65.7 | 55.2 (6/10) | 44.5 (8/9) |
+| `open-dense-31b` | 0.87 | 68.6 | 63.0 | 54.2 |
+| `open-dense-27b` | 1.47 | 83.6 | 81.3 | 73.6 (8/9) |
+| `open-moe-685b-a37b` | 2.15 | 66.7 | 64.9 | 56.9 |
+| `open-moe-1.06t-code` | 2.47 | 79.9 | 71.9 | 62.1 (7/9) |
+| `closed-mid-gen6` | 2.62 | 86.5 | 80.1 | 77.2 |
+| `open-moe-430b-vl` | 3.51 | 74.3 | 60.9 | 57.0 |
+| `open-moe-2.8t-a104b-hosted` | 3.87 | 83.6 | 73.1 | 70.2 |
+| `closed-frontier-gen1` | 4.18 | 68.0 | 70.9 | 60.9 |
+| `open-moe-2.8t-a104b` | 4.33 | 84.8 | 81.0 | 75.9 |
+| `closed-frontier-gen6` | 4.44 | 89.7 | 80.4 | 80.2 |
+| `closed-mid-gen5` | 4.67 | 81.8 | 78.1 | 74.6 |
+| `closed-frontier-gen2` | 4.95 | 78.8 | 73.8 | 65.3 |
+| `closed-frontier-gen4` | 5.32 | 81.1 | 74.9 | 73.0 |
+| `open-moe-743b-a39b` | 7.04 | 86.8 | 81.0 | 77.7 |
+| `closed-frontier-gen3` | 7.35 | 81.0 | 76.5 | 73.4 |
+| `closed-frontier-gen5` | 11.95 | 87.4 | 84.3 | 80.2 |
 
 ### Where the numbers stop
 
@@ -191,7 +195,7 @@ The old interface, `python3 route.py --tier high --floor 70`, still works for on
 
 ### What it delivers, measured
 
-Replaying the router over the 21 benchmark tasks, each routed from columns that leave that task out, then looking up the chosen model's **actual score and cost on that task**, against running `claude-opus-5` on everything ($251.04 for the 21 tasks, mean score 82.83):
+Replaying the router over the 21 benchmark tasks, each routed from columns that leave that task out, then looking up the chosen model's **actual score and cost on that task**, against running `closed-frontier-gen5` on everything ($251.04 for the 21 tasks, mean score 82.83):
 
 | Router | Cost saved | Quality change | Tasks below the required quality |
 |---|---:|---:|---:|
@@ -199,7 +203,7 @@ Replaying the router over the 21 benchmark tasks, each routed from columns that 
 | Rubric | 75.3% | −3.75 | 4 |
 | **Rubric with the failure rule (this version)** | **74.7%** | **−3.22** | **4** |
 
-On a second repository, cli/cli in Go, columns built from this benchmark alone routed the tasks with no adjustment and erred towards the stronger model. The failure rule cannot foresee a failure the benchmark never recorded: `claude-haiku-5-5` finished all 10 hard tasks here and then failed a hard cli/cli task by writing its output to the wrong folder.
+On a second repository, cli/cli in Go, columns built from this benchmark alone routed the tasks with no adjustment and erred towards the stronger model. The failure rule cannot foresee a failure the benchmark never recorded: `closed-efficient-gen6` finished all 10 hard tasks here and then failed a hard cli/cli task by writing its output to the wrong folder.
 
 These come from replaying the router against its own evidence with [`scripts/eval_swe_router.py`](../../benchmarks/scripts/eval_swe_router.py) in the benchmark repository: for whatever the skill picks, every model has already run every task, so the score and cost it would have got are a lookup rather than a new run.
 
@@ -213,11 +217,13 @@ uv run scripts/build_vended_models.py           # rewrite models.json
 uv run scripts/build_vended_models.py --check   # CI: fail if out of date
 ```
 
-`models.json` is generated and never edited by hand. Scores and costs come from `docs/metrics/pareto-frontier-omp-swe3.json` and the run summaries behind it. Each benchmark task's bucket comes from the dataset's rubric pass, `docs/metrics/swe-router-rubric-<dataset>-claude-opus-5-5.json`, recomputed from its stored answers with `routing-policy.json`. A new model needs only a rebuild; a new dataset, or a change to `rubric.md`, needs a new rubric pass first:
+The generator emits **real** model names, which is what you want: run it against your own measurements and `models.json` names models your developers can select. The copy committed here is the one exception — its names were replaced with placeholders after generation, so regenerating it in this repository replaces the placeholders with whatever your run measured.
+
+Scores and costs come from `docs/metrics/pareto-frontier-omp-swe3.json` and the run summaries behind it. Each benchmark task's bucket comes from the dataset's rubric pass, `docs/metrics/swe-router-rubric-<dataset>-<judge>.json`, recomputed from its stored answers with `routing-policy.json`. A new model needs only a rebuild; a new dataset, or a change to `rubric.md`, needs a new rubric pass first:
 
 ```bash
 uv run scripts/run-swe-router-headless.py --mode rubric --agent omp --provider bedrock \
-    --model us.anthropic.claude-opus-5-5 --dataset dataset/<dataset>.yaml --repeats 3
+    --model <your-judge-model-id> --dataset dataset/<dataset>.yaml --repeats 3
 ```
 
 ## Source

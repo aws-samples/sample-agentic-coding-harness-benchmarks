@@ -1,148 +1,107 @@
 {
   "schema_version": "1.0",
-  "note": "Maps the model slugs in models.json to the names coding assistants actually show or accept. One slug, many surfaces: a Bedrock inference profile, a vendor API id, a provider-prefixed id, and whatever a dropdown displays. Matching is case-insensitive; compare after lowercasing and stripping spaces, underscores and hyphens. If nothing matches exactly, fall back to substring and then ask the user.",
+  "model_names": "The model names in this file and in models.json are indicative placeholders, not the models that were run. The real vendor spellings an assistant would show -- inference profile ids, API ids, provider-prefixed ids, dropdown labels -- were removed with them, so what is left demonstrates the mechanism rather than resolving any real id. Rebuild this file against your own model list when you benchmark your own repository.",
+  "note": "Maps the model slugs in models.json to the names coding assistants actually show or accept. One slug, many surfaces: a hosted inference profile, a vendor API id, a provider-prefixed id, and whatever a dropdown displays. Matching is case-insensitive; compare after lowercasing and stripping spaces, underscores and hyphens. If nothing matches exactly, fall back to substring and then ask the user.",
   "matching_rules": [
     "Lowercase both sides, then strip spaces, underscores and hyphens before comparing.",
     "A trailing bracketed hint such as [1m] is a context-window marker, not part of the id. Strip it.",
-    "A leading region and vendor prefix such as us.anthropic. or eu.meta. is routing, not identity. Strip it.",
+    "A leading region and vendor prefix such as us.<vendor>. or eu.<vendor>. is routing, not identity. Strip it.",
     "A trailing date-and-version stamp such as -20251001-v1:0 identifies a snapshot of the same model. Strip it.",
-    "A provider prefix before a slash, such as anthropic/ or bedrock/, is routing. Strip it.",
+    "A provider prefix before a slash, such as <vendor>/ or bedrock/, is routing. Strip it.",
     "Match exactly first. Only if that fails, try substring. Never guess between two candidates -- ask."
   ],
   "unmatched_model_policy": "A model the user has that is absent from models.json has NOT been measured. Say so and leave it out of the ranking. Never estimate a score for it.",
   "aliases": {
-    "claude-opus-5-5": [
-      "claude-opus-5-5",
-      "us.anthropic.claude-opus-5-5",
-      "global.anthropic.claude-opus-5-5",
-      "anthropic/claude-opus-5-5",
-      "Claude Opus 5.5",
-      "opus-5.5",
-      "opus-5-5"
+    "closed-frontier-gen6": [
+      "closed-frontier-gen6",
+      "Closed frontier (gen 6)",
+      "closed frontier gen 6"
     ],
-    "claude-opus-5": [
-      "claude-opus-5",
-      "us.anthropic.claude-opus-5",
-      "anthropic/claude-opus-5",
-      "Claude Opus 5",
-      "opus-5",
-      "opus5"
+    "closed-frontier-gen5": [
+      "closed-frontier-gen5",
+      "Closed frontier (gen 5)",
+      "closed frontier gen 5"
     ],
-    "claude-opus-4-8": [
-      "claude-opus-4-8",
-      "us.anthropic.claude-opus-4-8",
-      "anthropic/claude-opus-4-8",
-      "Claude Opus 4.8",
-      "opus-4.8",
-      "opus-4-8"
+    "closed-frontier-gen4": [
+      "closed-frontier-gen4",
+      "Closed frontier (gen 4)",
+      "closed frontier gen 4"
     ],
-    "claude-opus-4-7": [
-      "claude-opus-4-7",
-      "us.anthropic.claude-opus-4-7",
-      "anthropic/claude-opus-4-7",
-      "Claude Opus 4.7",
-      "opus-4.7",
-      "opus-4-7"
+    "closed-frontier-gen3": [
+      "closed-frontier-gen3",
+      "Closed frontier (gen 3)",
+      "closed frontier gen 3"
     ],
-    "claude-opus-4-6-v1": [
-      "claude-opus-4-6",
-      "claude-opus-4-6-v1",
-      "us.anthropic.claude-opus-4-6",
-      "anthropic/claude-opus-4-6",
-      "Claude Opus 4.6",
-      "opus-4.6",
-      "opus-4-6"
+    "closed-frontier-gen2": [
+      "closed-frontier-gen2",
+      "Closed frontier (gen 2)",
+      "closed frontier gen 2"
     ],
-    "claude-opus-4-5": [
-      "claude-opus-4-5",
-      "us.anthropic.claude-opus-4-5",
-      "anthropic/claude-opus-4-5",
-      "Claude Opus 4.5",
-      "opus-4.5",
-      "opus-4-5"
+    "closed-frontier-gen1": [
+      "closed-frontier-gen1",
+      "Closed frontier (gen 1)",
+      "closed frontier gen 1"
     ],
-    "claude-sonnet-5-5": [
-      "claude-sonnet-5-5",
-      "us.anthropic.claude-sonnet-5-5",
-      "global.anthropic.claude-sonnet-5-5",
-      "anthropic/claude-sonnet-5-5",
-      "Claude Sonnet 5.5",
-      "sonnet-5.5",
-      "sonnet-5-5"
+    "closed-mid-gen6": [
+      "closed-mid-gen6",
+      "Closed mid-tier (gen 6)",
+      "closed mid tier gen 6"
     ],
-    "claude-haiku-5-5": [
-      "claude-haiku-5-5",
-      "us.anthropic.claude-haiku-5-5",
-      "global.anthropic.claude-haiku-5-5",
-      "anthropic/claude-haiku-5-5",
-      "Claude Haiku 5.5",
-      "haiku-5.5",
-      "haiku-5-5"
+    "closed-mid-gen5": [
+      "closed-mid-gen5",
+      "Closed mid-tier (gen 5)",
+      "closed mid tier gen 5"
     ],
-    "claude-sonnet-5": [
-      "claude-sonnet-5",
-      "us.anthropic.claude-sonnet-5",
-      "anthropic/claude-sonnet-5",
-      "Claude Sonnet 5",
-      "sonnet-5",
-      "sonnet5"
+    "closed-efficient-gen6": [
+      "closed-efficient-gen6",
+      "Closed efficient (gen 6)",
+      "closed efficient gen 6"
     ],
-    "claude-haiku-4-5": [
-      "claude-haiku-4-5",
-      "claude-haiku-4-5-20251001",
-      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-      "anthropic/claude-haiku-4-5",
-      "Claude Haiku 4.5",
-      "haiku-4.5",
-      "haiku-4-5"
+    "closed-efficient-gen1": [
+      "closed-efficient-gen1",
+      "closed-efficient-gen1-20251001-v1:0",
+      "Closed efficient (gen 1)",
+      "closed efficient gen 1"
     ],
-    "glm-5.3": ["glm-5.3", "zai-org/GLM-5.3", "GLM-5.3", "glm5.3"],
-    "qwen3.8-27b": [
-      "qwen3.8-27b",
-      "Qwen/Qwen3.8-27B",
-      "Qwen/Qwen3.8-27B-FP8",
-      "Qwen3.8-27B",
-      "qwen3.8"
+    "open-moe-2.8t-a104b": [
+      "open-moe-2.8t-a104b",
+      "Open MoE 2.8T, 104B active"
     ],
-    "qwen3.6-35b": ["qwen3.6-35b", "Qwen/Qwen3.6-35B", "Qwen3.6-35B", "qwen3.6"],
-    "qwen3-coder-30b": [
-      "qwen3-coder-30b",
-      "Qwen/Qwen3-Coder-30B",
-      "Qwen3-Coder-30B",
-      "qwen3coder30b"
+    "open-moe-2.8t-a104b-hosted": [
+      "open-moe-2.8t-a104b-hosted",
+      "Open MoE 2.8T, 104B active, hosted"
     ],
-    "kimi-k2.7-code": [
-      "kimi-k2.7-code",
-      "moonshotai/Kimi-K2.7-Code",
-      "Kimi K2.7 Code",
-      "kimi-k2.7"
+    "open-moe-1.06t-code": [
+      "open-moe-1.06t-code",
+      "Open MoE 1.06T, code-tuned"
     ],
-    "kimi-k3-bedrock": [
-      "kimi-k3-bedrock",
-      "moonshotai.kimi-k3",
-      "Kimi K3 on Amazon Bedrock"
+    "open-moe-743b-a39b": [
+      "open-moe-743b-a39b",
+      "Open MoE 743B, 39B active"
     ],
-    "kimi-k3": [
-      "kimi-k3",
-      "moonshotai/Kimi-K3",
-      "Kimi K3",
-      "kimik3"
+    "open-moe-685b-a37b": [
+      "open-moe-685b-a37b",
+      "Open MoE 685B, 37B active"
     ],
-    "deepseek-v3.2": [
-      "deepseek-v3.2",
-      "deepseek-ai/DeepSeek-V3.2",
-      "DeepSeek-V3.2",
-      "deepseek3.2"
+    "open-moe-430b-vl": [
+      "open-moe-430b-vl",
+      "Open MoE 430B, vision-language"
     ],
-    "gemma-4-31b": ["gemma-4-31b", "google/gemma-4-31b", "Gemma 4 31B", "gemma4-31b"],
-    "minimax-m2.5": ["minimax-m2.5", "MiniMaxAI/MiniMax-M2.5", "MiniMax M2.5", "minimax2.5"],
-    "minimax-m3": ["minimax-m3", "MiniMaxAI/MiniMax-M3", "MiniMax M3", "minimaxm3"],
-    "devstral-2-123b": [
-      "devstral-2-123b",
-      "mistralai/Devstral-2-123B",
-      "Devstral 2 123B",
-      "devstral2"
+    "open-moe-230b-a10b": [
+      "open-moe-230b-a10b",
+      "Open MoE 230B, 10B active"
     ],
-    "minicpm5-2b": ["minicpm5-2b", "openbmb/MiniCPM5-2B", "MiniCPM5-2B", "minicpm5"]
+    "open-moe-35b-a3b": [
+      "open-moe-35b-a3b",
+      "Open MoE 35B, 3B active"
+    ],
+    "open-moe-30b-a3b-code": [
+      "open-moe-30b-a3b-code",
+      "Open MoE 30B, 3B active, code-tuned"
+    ],
+    "open-dense-123b": ["open-dense-123b", "Open dense 123B"],
+    "open-dense-31b": ["open-dense-31b", "Open dense 31B"],
+    "open-dense-27b": ["open-dense-27b", "Open dense 27B"],
+    "open-dense-2.5b": ["open-dense-2.5b", "Open dense 2.5B"]
   }
 }

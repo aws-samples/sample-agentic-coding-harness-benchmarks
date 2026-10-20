@@ -9,12 +9,12 @@ The results above rank models on a whole dataset. A developer picks one per task
 
 We ran it against its own evidence. All 18 models have run all 21 v2 tasks, so for whatever the skill picks we can look up what that model scored and cost on that task instead of estimating it.
 
-| | Router | Closed frontier (gen 3) on everything |
+| | Router | Closed frontier (gen 5) on everything |
 |---|---:|---:|
 | Total cost, 21 tasks | **$137.16** | $251.04 |
 | Mean task score | 78.99 | 82.83 |
 
-**45.4% cheaper for 4.6% less quality**, using three models: Open dense 27B on 13 tasks, Closed frontier (gen 3) on 3, and Open MoE 2.8T / 104B active on 1. On 4 further tasks nothing cleared the floor and the skill's answer was to stay put.
+**45.4% cheaper for 4.6% less quality**, using three models: Open dense 27B on 13 tasks, Closed frontier (gen 5) on 3, and Open MoE 2.8T / 104B active on 1. On 4 further tasks nothing cleared the floor and the skill's answer was to stay put.
 
 Three caveats decide how much to trust that, and all three come from the judgment step rather than the arithmetic:
 

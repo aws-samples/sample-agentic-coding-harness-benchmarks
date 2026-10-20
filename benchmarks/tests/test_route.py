@@ -37,20 +37,24 @@ def _route(**kw):
 
 class NormalizeTest(unittest.TestCase):
     def test_strips_routing_and_packaging_from_names(self) -> None:
-        # Every one of these is claude-sonnet-5 wearing a different hat.
+        # Every one of these is closed-mid-gen5 wearing a different hat. One
+        # per rule in normalize(), because the model names these are standing
+        # in for are masked: without a case here, nothing exercises the rule.
         for name in (
-            "claude-sonnet-5",
-            "Claude Sonnet 5",
-            "us.anthropic.claude-sonnet-5",
-            "anthropic/claude-sonnet-5",
-            "us.anthropic.claude-sonnet-5[1m]",
-            "CLAUDE_SONNET_5",
+            "closed-mid-gen5",
+            "us.vendor.closed-mid-gen5",  # region and vendor prefix
+            "vendor/closed-mid-gen5",  # provider prefix
+            "us.vendor.closed-mid-gen5[1m]",  # context-window hint
+            "us.vendor.closed-mid-gen5-20251001-v1:0",  # snapshot stamp
+            "Closed Mid Gen 5",  # a dropdown label: spaces and case
+            "CLOSED_MID_GEN5",
         ):
-            self.assertEqual(route.normalize(name), "claudesonnet5", name)
+            self.assertEqual(route.normalize(name), "closedmidgen5", name)
 
     def test_keeps_distinct_models_distinct(self) -> None:
         self.assertNotEqual(
-            route.normalize("claude-opus-4-5"), route.normalize("claude-opus-4-8")
+            route.normalize("closed-frontier-gen1"),
+            route.normalize("closed-frontier-gen4"),
         )
 
 
@@ -82,19 +86,21 @@ class SelectionTest(unittest.TestCase):
                     )
 
     def test_reads_the_tier_not_the_overall_mean(self) -> None:
-        # claude-haiku-5-5 averages 72.69 overall but 79.16 on low and 60.00
+        # closed-efficient-gen6 averages 72.69 overall but 79.16 on low and 60.00
         # on high. A floor of 75 must take it for low work and reject it for
-        # hard work, as it must qwen3.8-27b (78.48 overall, 71.45 on high).
+        # hard work, as it must open-dense-27b (78.48 overall, 71.45 on high).
         r = _route(tier="high", floor=75)
-        self.assertNotIn(r["recommended"]["model"], {"claude-haiku-5-5", "qwen3.8-27b"})
+        self.assertNotIn(
+            r["recommended"]["model"], {"closed-efficient-gen6", "open-dense-27b"}
+        )
         r = _route(tier="low", floor=75)
-        self.assertEqual(r["recommended"]["model"], "claude-haiku-5-5")
+        self.assertEqual(r["recommended"]["model"], "closed-efficient-gen6")
 
     def test_flags_a_margin_inside_the_noise(self) -> None:
         # 71.45 against a floor of 70 is not a reliable pass.
         r = _route(tier="high", floor=70)
         p = r["recommended"]
-        self.assertEqual(p["model"], "qwen3.8-27b")
+        self.assertEqual(p["model"], "open-dense-27b")
         self.assertFalse(p["margin_is_meaningful"])
         self.assertLess(p["margin_over_floor"], route.DEFAULT_TIE_BAND)
 
@@ -110,11 +116,13 @@ class SelectionTest(unittest.TestCase):
         self.assertIn("short by", r["reason"])
 
     def test_availability_filters_before_ranking(self) -> None:
-        # A Bedrock-only developer must not be sent to a self-hosted model.
+        # A hosted-API-only developer must not be sent to a self-hosted model.
         r = _route(
-            tier="high", floor=70, available=["claude-opus-5", "claude-sonnet-5"]
+            tier="high",
+            floor=70,
+            available=["closed-frontier-gen5", "closed-mid-gen5"],
         )
-        self.assertEqual(r["recommended"]["model"], "claude-sonnet-5")
+        self.assertEqual(r["recommended"]["model"], "closed-mid-gen5")
 
     def test_unmeasured_available_models_are_named_not_scored(self) -> None:
         r = _route(tier="low", floor=70, available=["gpt-9", "llama-7"])
@@ -126,11 +134,11 @@ class SelectionTest(unittest.TestCase):
         r = _route(
             tier="low",
             floor=60,
-            available=["us.anthropic.claude-sonnet-5[1m]", "Claude Haiku 4.5"],
+            available=["us.vendor.closed-mid-gen5[1m]", "Closed efficient (gen 1)"],
         )
         self.assertEqual(
             sorted(r["candidates_considered"]),
-            ["claude-haiku-4-5", "claude-sonnet-5"],
+            ["closed-efficient-gen1", "closed-mid-gen5"],
         )
 
     def test_bad_tier_is_rejected(self) -> None:
@@ -148,21 +156,21 @@ class AllowListTest(unittest.TestCase):
         return Path(tmp.name)
 
     def test_allow_list_is_a_hard_constraint(self) -> None:
-        p = self._write("claude-haiku-4-5  # cheap\n")
+        p = self._write("closed-efficient-gen1  # cheap\n")
         r = _route(tier="low", floor=50, allowed_file=p, no_allow_list=False)
-        self.assertEqual(r["candidates_considered"], ["claude-haiku-4-5"])
+        self.assertEqual(r["candidates_considered"], ["closed-efficient-gen1"])
 
     def test_comments_and_blank_lines_are_ignored(self) -> None:
         # The whole reason for a plain list: a commented-out model is a
         # comment, and cannot be mistaken for policy.
         p = self._write(
             "# do not enable yet:\n"
-            "#   claude-opus-5\n"
+            "#   closed-frontier-gen5\n"
             "\n"
-            "claude-haiku-4-5  # approved for docs\n"
+            "closed-efficient-gen1  # approved for docs\n"
         )
         r = _route(tier="low", floor=50, allowed_file=p, no_allow_list=False)
-        self.assertEqual(r["candidates_considered"], ["claude-haiku-4-5"])
+        self.assertEqual(r["candidates_considered"], ["closed-efficient-gen1"])
 
     def test_allowed_but_unmeasured_models_are_named(self) -> None:
         p = self._write("some-model-we-never-ran\n")
@@ -185,27 +193,27 @@ class AllowListTest(unittest.TestCase):
 
     def test_an_allow_list_with_only_comments_is_an_error(self) -> None:
         # Permitting nothing is almost never what someone meant to write.
-        p = self._write("# every model is commented out\n#claude-opus-5\n")
+        p = self._write("# every model is commented out\n#closed-frontier-gen5\n")
         with self.assertRaisesRegex(route.RouteError, "lists no models"):
             _route(tier="low", floor=50, allowed_file=p, no_allow_list=False)
 
     def test_the_shipped_lists_commented_suggestions_are_not_policy(self) -> None:
-        # The file suggests the self-hosted kimi-k3, gemma-4-31b and
-        # qwen3.6-35b as commented lines. A comment is a comment.
+        # The file suggests the self-hosted open-moe-2.8t-a104b, open-dense-31b
+        # and open-moe-35b-a3b as commented lines. A comment is a comment.
         path = _VEND / "allowed-models.txt"
         names = route.parse_allow_list(path)
-        self.assertNotIn("kimi-k3", names)
-        self.assertNotIn("qwen3.6-35b", names)
+        self.assertNotIn("open-moe-2.8t-a104b", names)
+        self.assertNotIn("open-moe-35b-a3b", names)
         self.assertIn(
-            "#   kimi-k3",
+            "#   open-moe-2.8t-a104b",
             path.read_text(encoding="utf-8"),
-            "the file should still suggest kimi-k3 as an addition",
+            "the file should still suggest open-moe-2.8t-a104b as an addition",
         )
 
     def test_the_shipped_allow_list_parses(self) -> None:
         names = route.parse_allow_list(_VEND / "allowed-models.txt")
         self.assertEqual(len(names), 5)
-        self.assertIn("claude-opus-5", names)
+        self.assertIn("closed-frontier-gen5", names)
 
     def test_the_shipped_allow_list_is_the_frontier(self) -> None:
         # It is the frontier by construction, so a regenerated frontier must
@@ -216,23 +224,27 @@ class AllowListTest(unittest.TestCase):
         self.assertEqual(names, frontier)
 
     def test_the_shipped_allow_list_says_what_it_excludes(self) -> None:
-        # qwen3.8-27b is self-hosted, so a hosted-API developer who keeps it
+        # open-dense-27b is self-hosted, so a hosted-API developer who keeps it
         # would be sent to a model they cannot select. The file must say so.
         text = (_VEND / "allowed-models.txt").read_text(encoding="utf-8")
-        self.assertIn("qwen3.8-27b, is self-hosted", text)
+        self.assertIn("open-dense-27b, is also self-hosted", text)
 
-    def test_the_shipped_allow_list_forces_opus_for_bedrock_users(self) -> None:
+    def test_the_shipped_allow_list_forces_the_top_model_for_hosted_users(self) -> None:
         # Recorded because it is the argument for editing the shipped list:
-        # an available model that is not on it (claude-sonnet-5,
-        # claude-haiku-4-5) is never recommended, however well it scores.
+        # an available model that is not on it (closed-mid-gen5,
+        # closed-efficient-gen1) is never recommended, however well it scores.
         r = _route(
             tier="high",
             floor=70,
-            available=["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+            available=[
+                "closed-frontier-gen5",
+                "closed-mid-gen5",
+                "closed-efficient-gen1",
+            ],
             allowed_file=_VEND / "allowed-models.txt",
             no_allow_list=False,
         )
-        self.assertEqual(r["recommended"]["model"], "claude-opus-5")
+        self.assertEqual(r["recommended"]["model"], "closed-frontier-gen5")
 
 
 class SkillTriggerTest(unittest.TestCase):

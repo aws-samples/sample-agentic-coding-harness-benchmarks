@@ -105,8 +105,8 @@ def normalize(name: str) -> str:
     n = name.strip().lower()
     n = re.sub(r"\[[^\]]*\]$", "", n)  # [1m] context-window hint
     n = re.sub(r"-\d{8}-v\d+:\d+$", "", n)  # -20251001-v1:0 snapshot stamp
-    n = n.rsplit("/", 1)[-1]  # anthropic/ provider prefix
-    n = re.sub(r"^[a-z]{2}\.[a-z0-9-]+\.", "", n)  # us.anthropic. region prefix
+    n = n.rsplit("/", 1)[-1]  # vendor/ provider prefix
+    n = re.sub(r"^[a-z]{2}\.[a-z0-9-]+\.", "", n)  # us.vendor. region prefix
     return re.sub(r"[\s_.-]", "", n)
 
 

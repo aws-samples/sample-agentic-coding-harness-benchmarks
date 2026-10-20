@@ -36,12 +36,14 @@ This repository holds a benchmark harness and a skill that reads what the harnes
 
 A platform team runs the benchmark on a schedule, and every developer's assistant reads the result before each task. See the [ASCII diagram](docs/diagram-ascii.md) for a visual overview.
 
+**Model names in the published results are indicative placeholders, not the models that were run.** That holds for the chart below and for the data shipped with [`swe-router`](vend/swe-router/README.md): closed-source models are named by tier and generation (`closed-frontier-gen5`, `closed-mid-gen6`), open-weight models by parameter count and dense/MoE architecture (`open-moe-743b-a39b`, `open-dense-27b`). Every score, cost and completion count is the measured value — only the names are substituted, and no placeholder is a model you can select. **Run the benchmark in your own repository to get these results under the real model names.**
+
 ## Step 1 — Benchmark, and get a frontier
 
 One command per model. The `/benchmark` skill runs the pre-flight checks, the harness over a dataset, and the judge:
 
 ```
-/benchmark provider=bedrock model=claude-opus-5 dataset=dataset/mcp-gateway-registry-v2.yaml agent=omp
+/benchmark provider=bedrock model=<your-model-id> dataset=dataset/mcp-gateway-registry-v2.yaml agent=omp
 ```
 
 `agent` names the coding agent that drives the task and defaults to `claude`. The same flow runs headless from [`run-e2e-benchmark.sh`](benchmarks/scripts/run-e2e-benchmark.sh) (`--provider bedrock|litellm|vllm --model ... --dataset ... --agent claude|pi|omp|kiro|codex|strands|strands-harness --skill swe2|swe3`). Repeat across your model list, then the generators plot the cost/quality frontier for your repo and model set.
