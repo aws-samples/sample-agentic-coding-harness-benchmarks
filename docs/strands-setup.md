@@ -57,7 +57,7 @@ The runner reports the SDK's accumulated usage. The two providers define `inputT
 - Amazon Bedrock reports fresh input tokens, with cache reads and cache writes as separate counts. The harness uses them as they are.
 - The OpenAI-compatible client copies the endpoint's `prompt_tokens`, which includes cached tokens, into `inputTokens`, and reports the cached part again as `cacheReadInputTokens`. The harness subtracts the cached part, so the cached prompt is not billed twice.
 
-Strands reports no dollar cost. The harness prices the tokens with [bedrock_pricing.py](../benchmarks/scripts/bedrock_pricing.py), as it does for codex. The table covers the Claude models from Haiku 4.5 to the Claude 5 family, read from the AWS Price List API: a `us.` or bare id pays the Regional rate, and a `global.` id pays the Global cross-region rate, which is 10% lower. A model missing from the table gets a null cost. `num_turns` is the SDK's event-loop cycle count: one model call and the tool calls it asked for.
+Strands reports no dollar cost, so the harness falls back to the local price table in [bedrock_pricing.py](../benchmarks/scripts/bedrock_pricing.py), as it does for codex. That table deliberately carries only the GPT models: an Anthropic model reports its cost through the agent, so there is nothing to derive for the agents that pass it through. Strands is not one of those agents -- it reports usage but no cost -- so a Claude model driven by `--agent strands` or `--agent strands-harness` records `total_cost_usd` as **null**, and the token counts are the measurement to use. Price the run yourself from `metrics_that_matter` if you need a figure. `num_turns` is the SDK's event-loop cycle count: one model call and the tool calls it asked for.
 
 ## Known limits
 

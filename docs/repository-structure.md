@@ -25,7 +25,7 @@ sample-agentic-coding-harness-benchmarks/
 │       └── vllm-setup/        /vllm-setup — stand up the EC2 vLLM server (Path 3)
 ├── docs/                      ← Concepts, setup guides, and methodology
 ├── vend/                      ← Vendored, installable artifacts
-│   └── swe-router/            /swe-router skill: route.py, models.json, install.sh
+│   └── swe-router/            /swe-router skill: route.py, rubric.md, routing-policy.json, models.json, install.sh
 ├── benchmarks/                ← The benchmark harness
 │   ├── README.md              Harness landing page
 │   ├── docs/                  Shared harness reference + one guide per hosting path
