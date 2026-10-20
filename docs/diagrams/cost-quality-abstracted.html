@@ -79,12 +79,12 @@
   <h1 class="viz-title">Cost vs. quality on one repository — by model class</h1>
   <p class="viz-sub">
     Mean judge score against mean cost per task, over 21 software-engineering tasks in a single repository.
-    Eleven of the nineteen models measured are shown: the six on the frontier, plus five that mark out the spread.
+    Twelve of the twenty-three models measured are shown: the six on the frontier, plus six that mark out the spread.
     Model names are abstracted to their class — closed-source models by tier and generation, open-weight models by architecture.
   </p>
 
   <svg id="chart" viewBox="0 0 1536 872" width="1536" height="872"
-       role="img" aria-label="Scatter plot of mean task score against mean cost per task for eleven model classes — the six on the cost/quality frontier plus five off it. A dashed line connects the frontier points, which step steeply from 59 to 78 points of score for under a dollar more per task, then rise only a few points across the remaining tenfold increase in cost.">
+       role="img" aria-label="Scatter plot of mean task score against mean cost per task for twelve model classes — the six on the cost/quality frontier plus six off it. A dashed line connects the frontier points, which step steeply from 59 to 78 points of score for under a dollar more per task, then rise only a few points across the remaining tenfold increase in cost.">
     <defs>
       <linearGradient id="frontFill" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#1baf7a" stop-opacity="0.10"/>
@@ -96,9 +96,9 @@
 
   <p class="viz-note">
     <strong>What is abstracted, and what is left out.</strong> Only the model names. Every score, cost and position is the measured value from the run.
-    A closed-source point is named by tier and generation — generation numbers ascend with recency and are relative to this chart, not a vendor's version numbering.
+    A closed-source point is named by tier and generation — generation numbers ascend with recency over every model measured here, matching vend/swe-router/models.json, and are not a vendor's version numbering.
     An open-weight point is named by parameter count and dense/MoE architecture, since that is what determines the hardware it needs.
-    Eight further measured models are omitted to keep the chart readable; all of them sit below the frontier, so none of them changes its shape.
+    Eleven further measured models are omitted to keep the chart readable; all of them sit below the frontier, so none of them changes its shape.
     <br>
     <strong>Cost basis — the two colours are not one currency.</strong> A closed-source point is a metered per-token bill.
     An open-weight point is hardware-derived: the GPU instance's hourly rate divided by measured throughput at a stated concurrency.
@@ -108,14 +108,15 @@
 </div>
 
 <script>
-// A readable subset of the 19 models measured: the six on the frontier, plus five
+// A readable subset of the 23 models measured: the six on the frontier, plus six
 // off-frontier points that each make a distinct point about the spread. Generation
-// numbers ascend with recency and are relative to this set only.
+// numbers ascend with recency over the whole measured set and match models.json.
 const DATA = [
   // closed-source, metered bill
-  { c: 11.9543, s: 82.83, k: 'closed', label: 'Closed frontier (gen 3, current)', la: 'end',   dx:  -8, dy: -20 },
-  { c:  4.6715, s: 76.97, k: 'closed', label: 'Closed mid-tier (gen 3)',          la: 'start', dx:  18, dy:   6 },
-  { c:  5.3200, s: 74.69, k: 'closed', label: 'Closed frontier (gen 2)',          la: 'start', dx:  18, dy:   6 },
+  { c: 11.9543, s: 82.83, k: 'closed', label: 'Closed frontier (gen 5)',          la: 'end',   dx:  -8, dy: -20 },
+  { c:  4.4400, s: 81.16, k: 'closed', label: 'Closed frontier (gen 6, current)', la: 'start', dx:  18, dy: -14 },
+  { c:  4.6715, s: 76.97, k: 'closed', label: 'Closed mid-tier (gen 5)',          la: 'start', dx:  18, dy:   6 },
+  { c:  5.3200, s: 74.69, k: 'closed', label: 'Closed frontier (gen 4)',          la: 'start', dx:  18, dy:   6 },
   { c:  4.1800, s: 66.32, k: 'closed', label: 'Closed frontier (gen 1)',          la: 'end',   dx: -16, dy:   6 },
 
   // open-weight, self-hosted, hardware-derived
@@ -131,16 +132,16 @@ const DATA = [
 // The cost/quality frontier: nothing scores at least as high for at most the cost.
 const FRONTIER = [
   { c: 0.2594, s: 59.24 }, { c: 0.8708, s: 59.74 }, { c: 1.4738, s: 78.48 },
-  { c: 4.3310, s: 79.17 }, { c: 7.0397, s: 80.11 }, { c: 11.9543, s: 82.83 },
+  { c: 4.3310, s: 79.17 }, { c: 4.4400, s: 81.16 }, { c: 11.9543, s: 82.83 },
 ];
 
 const PANEL = [
-  ['Open MoE 35B / 3B',   '59.2', '$0.26',  ''],
-  ['Open dense 31B',      '59.7', '$0.87',  '+0.5 / +$0.61'],
-  ['Open dense 27B',      '78.5', '$1.47',  '+18.8 / +$0.60'],
-  ['Open MoE 2.8T',       '79.2', '$4.33',  '+0.7 / +$2.86'],
-  ['Open MoE 743B',       '80.1', '$7.04',  '+0.9 / +$2.71'],
-  ['Closed frontier',     '82.8', '$11.95', '+2.7 / +$4.91'],
+  ['Open MoE 35B / 3B',       '59.2', '$0.26',  ''],
+  ['Open dense 31B',          '59.7', '$0.87',  '+0.5 / +$0.61'],
+  ['Open dense 27B',          '78.5', '$1.47',  '+18.8 / +$0.60'],
+  ['Open MoE 2.8T',           '79.2', '$4.33',  '+0.7 / +$2.86'],
+  ['Closed frontier (gen 6)', '81.2', '$4.44',  '+2.0 / +$0.11'],
+  ['Closed frontier (gen 5)', '82.8', '$11.95', '+1.7 / +$7.51'],
 ];
 
 const L = 116, R = 1516, T = 30, B = 762;          // plot rect
