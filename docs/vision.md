@@ -1,6 +1,6 @@
 # The vision: a cost-aware coding harness that routes across the frontier
 
-This repository measures a [cost/quality Pareto frontier](../README.md#results-a-worked-example) -- the set of models where nothing else is both better and cheaper. Building that frontier is not the end goal. It is the **lookup table** for the thing we actually want to build: a coding harness (or agent) that, given a task, **intelligently picks the right model from the frontier for that task** -- and switches models mid-task when the situation changes -- so a developer gets frontier-level results at workhorse-level cost without ever having to think about model selection.
+This repository measures a [cost/quality Pareto frontier](../README.md#step-1--benchmark-and-get-a-frontier) -- the set of models where nothing else is both better and cheaper. Building that frontier is not the end goal. It is the **lookup table** for the thing we actually want to build: a coding harness (or agent) that, given a task, **intelligently picks the right model from the frontier for that task** -- and switches models mid-task when the situation changes -- so a developer gets frontier-level results at workhorse-level cost without ever having to think about model selection.
 
 ## The problem this solves
 
@@ -23,7 +23,7 @@ The result: the developer states a task and a budget posture ("cheap", "balanced
 
 ## The first concrete step: `/swe-auto`
 
-The first slice of this vision is **`/swe-auto`** -- a router skill that runs on **either Claude Code or pi**. The developer does not choose the model. Given a repo + ref + problem, a configurable **router model** triages the task read-only, classifies it as **frontier / workhorse / budget**, consults the measured [cost/quality Pareto frontier](../README.md#results-a-worked-example) to pick the cheapest non-dominated model that clears that tier's quality band, then shells out to the existing headless runner to run the **`/swe3`** skill with the selected model and harness -- producing the six artifacts (and, optionally, an `eval.json`). If the first pick fails to complete or scores below its band, it escalates one tier and re-runs, bounded by `max_escalations`.
+The first slice of this vision is **`/swe-auto`** -- a router skill that runs on **either Claude Code or pi**. The developer does not choose the model. Given a repo + ref + problem, a configurable **router model** triages the task read-only, classifies it as **frontier / workhorse / budget**, consults the measured [cost/quality Pareto frontier](../README.md#step-1--benchmark-and-get-a-frontier) to pick the cheapest non-dominated model that clears that tier's quality band, then shells out to the existing headless runner to run the **`/swe3`** skill with the selected model and harness -- producing the six artifacts (and, optionally, an `eval.json`). If the first pick fails to complete or scores below its band, it escalates one tier and re-runs, bounded by `max_escalations`.
 
 The key design decision: the skill does the triage and frontier lookup **inline** (cheap), then **executes via `run-swe-headless.py`** rather than spawning a subagent -- so the same executor path works whether the router runs under Claude Code or pi (pi cannot fan out). Note the two independent harness choices: which agent runs the *router skill*, and which agent the *executor* drives `/swe3` under (`--agent`); they can match or differ.
 
@@ -71,7 +71,7 @@ sequenceDiagram
 
 You cannot route intelligently without knowing, per model:
 
-1. **How good it is** -- the quality benchmark (judge scores, and the [per-dimension breakdown](../README.md#quality-by-dimension-where-models-are-strong-or-weak) that tells you *which kinds* of work each model is reliable at).
+1. **How good it is** -- the quality benchmark (judge scores, and the [per-dimension breakdown](cost-per-task-methodology.md) that tells you *which kinds* of work each model is reliable at).
 2. **What it costs** -- the throughput benchmark, turned into a hardware-derived [cost per task](cost-per-task-methodology.md).
 3. **Where it sits relative to every other model** -- the Pareto frontier that combines the two.
 

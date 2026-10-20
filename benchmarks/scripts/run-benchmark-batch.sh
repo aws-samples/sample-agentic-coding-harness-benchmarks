@@ -42,7 +42,8 @@
 #   --dataset    dataset YAML, relative to benchmarks/ (required)
 #   --models     comma-separated model ids, run in order (required)
 #   --tasks      comma-separated task ids; default is every task in the dataset
-#   --agent      coding agent: pi (default), claude, omp, kiro
+#   --agent      coding agent: pi (default), claude, omp, kiro, codex, strands,
+#                strands-harness
 #   --skill      swe3 (default) or swe2
 #   --aws-region region for the codex judge (default us-east-1). Needed even on
 #                the vllm path: the model is local but the judge is on Bedrock.
