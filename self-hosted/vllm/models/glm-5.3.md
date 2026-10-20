@@ -116,7 +116,7 @@ Uses the `glm47` parser, same as 5.2. Tool calls come back as structured `tool_u
 - **DeepGEMM is required** for FP8 performance (already present on this node — `deep_gemm.py` shows PDL and E8M0 enabled in the serve log).
 - **Download speed:** ~756 GB. The repo is ungated, but without `HF_TOKEN` downloads are rate-limited; set a token.
 - **Startup time:** expect 5.2's profile or worse — roughly 15-20 min on a cold cache (download dominates), ~5-8 min once weights are local, plus MTP adding a little to graph capture.
-- **Prefix caching:** keep it on for `/swe` and `/implement` benchmarks, where the system prompt and skill instructions are constant across turns. Add `--no-enable-prefix-caching` only for clean throughput measurement.
+- **Prefix caching:** keep it on for `/swe2` and `/swe3` benchmarks, where the system prompt and skill instructions are constant across turns. Add `--no-enable-prefix-caching` only for clean throughput measurement.
 - **NVFP4 on Blackwell:** `Inferact/GLM-5.3-NVFP4` re-quantizes only the MoE expert linears (~465 GB), leaving attention, shared experts, embeddings, and early dense layers in BF16. Irrelevant on H200, relevant if this ever moves to B200.
 
 ## Comparison with other frontier models
