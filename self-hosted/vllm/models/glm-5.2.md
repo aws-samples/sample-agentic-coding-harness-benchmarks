@@ -101,7 +101,7 @@ Uses the `glm47` parser. Tool calls are returned as structured `tool_use` blocks
 - **libcudart / libcuda / libnvrtc:** FlashInfer's FP8-kernel JIT links against all three, and needs unversioned `.so` names on a path its build command searches (`$CUDA_HOME/lib64` + `stubs`). If you hit `cannot find -lcudart`, `-lcuda`, or `-lnvrtc`, do **not** just symlink libcudart into `/usr/lib` — follow Fixes 2+3 in [`p5en-h200-cuda-fixes.md`](../../../.claude/skills/vllm-setup/p5en-h200-cuda-fixes.md), which create all three symlinks in the right place. (`-lnvrtc` in particular is GLM-5.2/FP8-specific; Kimi does not hit it.)
 - **Download speed:** The FP8 model is ~750 GB (282 safetensor files). Without `HF_TOKEN`, downloads are rate-limited. Set a token for faster downloads.
 - **Startup time:** First boot takes ~15–20 minutes (download + weight loading + torch.compile + CUDA graph capture). Subsequent boots (weights cached) take ~5–8 minutes.
-- **Prefix caching:** Enabled by default. Very effective for `/swe` and `/implement` benchmarks where the system prompt + skill instructions are constant across turns.
+- **Prefix caching:** Enabled by default. Very effective for `/swe2` and `/swe3` benchmarks where the system prompt + skill instructions are constant across turns.
 
 ## Comparison with other frontier models
 
