@@ -228,7 +228,10 @@ DEFAULT_SKILL = SKILL_SWE3
 # suffix (e.g. "[1m]"). The /swe skill strips both to name its artifact folder,
 # so the harness must derive the same slug to find the artifacts the skill wrote.
 # Matches a leading "<region>.<vendor>." such as "us.anthropic." or "eu.meta.".
-_BEDROCK_PREFIX_RE = re.compile(r"^[a-z]{2}\.[a-z0-9-]+\.")
+# The region is a two-letter code or one of Bedrock's longer cross-region
+# prefixes ("apac.", "us-gov.", "global."); a bare "<vendor>.<model>" such as
+# "moonshotai.kimi-k2-thinking" has no region and is left alone (issue #205).
+_BEDROCK_PREFIX_RE = re.compile(r"^(?:[a-z]{2}|apac|us-gov|global)\.[a-z0-9-]+\.")
 # Matches a trailing bracketed suffix such as "[1m]".
 _MODEL_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
 # Matches a trailing Anthropic date+version stamp such as "-20251001-v1:0", so a
