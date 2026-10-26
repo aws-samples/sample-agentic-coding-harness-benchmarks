@@ -111,7 +111,7 @@ _THEME = {
 
 
 def _load_summary(data_dir: Path, model: str, harness: str, skill: str, scope: str):
-    """Load a committed run-summary.json.
+    """Load a run's run-summary.json.
 
     Args:
         data_dir: The swe-benchmark-data root.
