@@ -2214,3 +2214,101 @@ class DisplayConfigTest(unittest.TestCase):
     def test_bedrock_config_is_returned_unchanged(self) -> None:
         config = _config(provider="bedrock", aws_region="us-west-2", endpoint=None)
         self.assertIs(harness._display_config(config), config)
+
+
+class BedrockSlugPrefixTest(unittest.TestCase):
+    """model_to_slug must strip every Bedrock cross-region prefix, not just two-letter ones.
+
+    The slug names the artifact folder the /swe skill writes to, so a prefix left
+    in place sends the run's output somewhere the harness and the judge do not
+    look for it.
+    """
+
+    def test_every_cross_region_prefix_is_stripped(self) -> None:
+        from runner_config import model_to_slug
+
+        for model in (
+            "us.anthropic.claude-opus-5",
+            "global.anthropic.claude-opus-5",
+            "apac.anthropic.claude-opus-5",
+            "us-gov.anthropic.claude-opus-5",
+        ):
+            self.assertEqual(model_to_slug(model), "claude-opus-5", model)
+
+    def test_a_bare_vendor_id_keeps_its_vendor(self) -> None:
+        # No region component, so there is no prefix to strip (issue #205).
+        from runner_config import model_to_slug
+
+        self.assertEqual(
+            model_to_slug("moonshotai.kimi-k2-thinking"), "moonshotai.kimi-k2-thinking"
+        )
+
+
+class RetryGuardsFinishedWorkTest(unittest.TestCase):
+    """A task with every artifact on disk is done, whatever the exit looked like.
+
+    A retry clears the task's artifacts before re-running, so retrying finished
+    work can only lose it. omp can end on stopReason "toolUse" straight after
+    writing its final summary.
+    """
+
+    def test_all_artifacts_present_is_not_retryable(self) -> None:
+        summary = {"ok": False, "design_done": True, "patch_done": True, "metrics": {}}
+        self.assertFalse(harness._summary_is_retryable(summary))
+
+    def test_partial_artifacts_stays_retryable(self) -> None:
+        summary = {"ok": False, "design_done": True, "patch_done": False, "metrics": {}}
+        self.assertTrue(harness._summary_is_retryable(summary))
+
+
+class DisjointAgentVllmCacheTest(unittest.TestCase):
+    """A vLLM cache read is a SUBSET of a disjoint agent's input_tokens.
+
+    codex and strands report input_tokens as the whole prompt. Their counts are
+    declared disjoint, so everything downstream sums
+    input + output + cache_read + cache_write -- which counts the cached prompt
+    twice when the cache figure came from vLLM rather than the agent's own API
+    (issue #200).
+    """
+
+    def _vllm(self, prompt: int, cached: int) -> dict:
+        return harness._vllm_metrics(
+            _snap(
+                **{
+                    "vllm:prompt_tokens_total": 0.0,
+                    "vllm:prompt_tokens_cached_total": 0.0,
+                }
+            ),
+            _snap(
+                **{
+                    "vllm:prompt_tokens_total": float(prompt),
+                    "vllm:prompt_tokens_cached_total": float(cached),
+                }
+            ),
+        )
+
+    def test_cached_part_is_moved_out_of_input(self) -> None:
+        metrics = {"input_tokens": 1000, "output_tokens": 100}
+        s = harness._summary_metrics(metrics, self._vllm(1000, 800), 0.0, agent="codex")
+        # 200 fresh + 100 output + 800 cache_read + 0 cache_write = 1100,
+        # the prompt counted once. Unfixed this totalled 1900.
+        self.assertEqual(s["input_tokens"], 200)
+        self.assertEqual(s["cache_write_tokens"], 0)
+        self.assertEqual(s["total_tokens"], 1100)
+        self.assertIn("minus", s["sources"]["input_tokens"])
+
+    def test_an_additive_agent_is_untouched(self) -> None:
+        # claude's own API reports cache separately from input, so there is
+        # nothing to subtract.
+        metrics = {"input_tokens": 1000, "output_tokens": 100}
+        s = harness._summary_metrics(
+            metrics, self._vllm(1000, 800), 0.0, agent="claude"
+        )
+        self.assertEqual(s["input_tokens"], 1000)
+        self.assertNotIn("minus", s["sources"]["input_tokens"])
+
+    def test_a_run_with_no_input_count_keeps_its_shape(self) -> None:
+        # A codex run that died before its first turn has no whole prompt to split.
+        metrics = {"input_tokens": 0, "output_tokens": 0}
+        s = harness._summary_metrics(metrics, self._vllm(1000, 800), 0.0, agent="codex")
+        self.assertEqual(s["input_tokens"], 0)
