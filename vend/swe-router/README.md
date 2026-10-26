@@ -95,7 +95,7 @@ If it is firing when you do not want it, narrow the `Run it BEFORE…` sentence 
 
 ## How it decides
 
-The skill asks your assistant's model six questions about the task, from [`rubric.md`](rubric.md), and `route.py` turns the answers into a model. The rubric file carries each question, its scoring guide and the arithmetic; the walk-through below follows the same order.
+The skill asks your assistant's model six questions about the task, from [`rubric.md`](rubric.md), and `route.py` turns the answers into a model. The rubric file carries each question, its scoring guide and the arithmetic; the walk-through below follows the same order. For why these six and not others -- what each dimension is looking for, and why the difficulty bucket and the quality bar are kept separate -- see [the rubric design notes](../../docs/swe-router-rubric-design.md).
 
 ```
    the task + the repository (AGENTS.md / CLAUDE.md / README.md first)
