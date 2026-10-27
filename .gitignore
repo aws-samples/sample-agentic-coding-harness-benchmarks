@@ -19,12 +19,36 @@ self-hosted/vllm/logs/
 .env.*
 .scratchpad/
 
-# Benchmark target repositories are cloned locally by contributors at a specific tag.
-# Keep the README and the generated artifacts tracked, but never commit the cloned source.
-# The double-glob form also catches nested copies a tool/cwd mistake might create
-# (e.g. bedrock/benchmarks/swe-benchmark-data/<repo>/repo/).
-benchmarks/swe-benchmark-data/*/repo/
-**/benchmarks/swe-benchmark-data/*/repo/
+# Benchmark run output. This repository publishes NO run output: not the design
+# artifacts, not the per-task metrics, not the judge scores, not the agent event
+# streams. Only the directory's own README is tracked. The previous rules here
+# ignored just the cloned target repos (<repo>/repo/), which left every artifact
+# a run writes -- metrics.json, eval.json, patch.diff and multi-megabyte
+# *-stream.jsonl -- committable by a plain `git add -A` after a benchmark, while
+# three docs stated the opposite. Ignore the tree and re-include the README.
+# (Upstream re-includes metrics.json, eval.json and run-summary.json so its runs
+# are inspectable from git. That is the one place this rule deliberately differs:
+# here those files are measured results, which this repository does not publish.)
+benchmarks/swe-benchmark-data/**
+!benchmarks/swe-benchmark-data/
+!benchmarks/swe-benchmark-data/README.md
+
+# Per-task target-repo clones. The harness clones into
+# <clone_dir>/swe-clone-<task-id>/ (clone_dir defaults to /tmp, outside the
+# repo) and deletes them after each task; this is the backstop for a config that
+# points clone_dir inside the repo, so a leftover clone from a killed run can
+# never be committed. The swe-clone- prefix is specific enough that this never
+# matches the swe-benchmark-data output tree.
+swe-clone-*/
+**/swe-clone-*/
+
+# Stray repo-root writes from a benchmark session: an agent handed a bare
+# relative filename instead of the absolute artifacts_dir drops the file here,
+# because both harnesses run the agent with cwd=REPO_ROOT. Named individually
+# rather than by glob so an ordinary new doc at the root is not silently ignored.
+/completion_confirmation.md
+/task_completion_report.txt
+/github-issue.md
 __pycache__/
 *.pyc
 credentials.json
@@ -40,4 +64,11 @@ security-review-findings.xlsx
 .venv/
 tmp/
 .claude/worktrees/
-benchmarks/swe-benchmark-data/**/replay.jsonl
+# The runner config holds the endpoint and, unless api_key_env is used, a literal
+# API key. Two docs and the onboard-benchmark skill tell every new user to create
+# this file and state that it is gitignored; until now it was not.
+benchmarks/config/runner.yaml
+
+# HuggingFace token, second spelling (see .hf_token above).
+.hftoken
+**/.hftoken

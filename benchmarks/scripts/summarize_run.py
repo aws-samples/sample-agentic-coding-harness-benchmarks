@@ -174,9 +174,9 @@ def _summarize(folder: Path, run_date: str | None) -> dict[str, Any]:
 
     # Identity/serving from the first task's metrics (uniform across a run).
     first = _read_json(folder / rows[0]["task"] / "metrics.json") or {}
-    # run-summary.json is committed to git, so drop the judge block's local-only
-    # temp path (repo_root, e.g. /tmp/swe-judge-repos/...); it is machine-specific
-    # noise, not provenance worth committing.
+    # Drop the judge block's local-only temp path (repo_root, e.g.
+    # /tmp/swe-judge-repos/...): it is machine-specific noise, not provenance,
+    # and run-summary.json is the file a team would keep or publish.
     judge = dict((first.get("evaluation") or {}).get("judge") or {})
     judge.pop("repo_root", None)
     refs = sorted({r["ref"] for r in rows if r.get("ref")})

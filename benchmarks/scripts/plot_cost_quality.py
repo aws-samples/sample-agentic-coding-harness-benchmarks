@@ -253,7 +253,7 @@ def _task_score(eval_data: dict | None) -> float | None:
 def _point_from_summary(
     model_repo_dir: Path, model: str, arms: dict[str, str] | None = None
 ) -> ModelPoint | None:
-    """Build a ModelPoint from the committed run-summary.json, if present.
+    """Build a ModelPoint from a run's run-summary.json, if present.
 
     run-summary.json already carries the leaderboard-convention means (failed
     0-score tasks excluded) and is committed for every model, so it is the
