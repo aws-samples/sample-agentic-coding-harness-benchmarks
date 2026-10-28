@@ -2312,3 +2312,90 @@ class DisjointAgentVllmCacheTest(unittest.TestCase):
         metrics = {"input_tokens": 0, "output_tokens": 0}
         s = harness._summary_metrics(metrics, self._vllm(1000, 800), 0.0, agent="codex")
         self.assertEqual(s["input_tokens"], 0)
+
+
+class OmpModelResolutionTest(unittest.TestCase):
+    """omp fuzzy-matches --model, so the harness must catch a substituted model."""
+
+    _HAIKU_5_5 = "us.anthropic.claude-haiku-5-5"
+    _HAIKU_4_5 = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+    def _bedrock_config(self) -> RunnerConfig:
+        return _config(
+            agent="omp", provider="bedrock", endpoint=None, model=self._HAIKU_5_5
+        )
+
+    def _events(self, *models: str) -> list[dict[str, object]]:
+        events: list[dict[str, object]] = [
+            {"type": "message_end", "message": {"role": "user"}}
+        ]
+        for model in models:
+            events.append(
+                {
+                    "type": "message_end",
+                    "message": {"role": "assistant", "model": model},
+                }
+            )
+        return events
+
+    def test_models_used_lists_assistant_models_once(self) -> None:
+        events = self._events(self._HAIKU_4_5, self._HAIKU_4_5)
+        self.assertEqual(harness._omp_models_used(events), [self._HAIKU_4_5])
+
+    def test_mismatch_marks_result_failed(self) -> None:
+        result: dict[str, object] = {"is_error": False, "subtype": "success"}
+        harness._flag_omp_model_mismatch(result, self._HAIKU_5_5, [self._HAIKU_4_5])
+        self.assertEqual(
+            (result["is_error"], result["subtype"]),
+            (True, harness.OMP_MODEL_MISMATCH_SUBTYPE),
+        )
+
+    def test_matching_model_leaves_result_alone(self) -> None:
+        result: dict[str, object] = {"is_error": False, "subtype": "success"}
+        harness._flag_omp_model_mismatch(result, self._HAIKU_5_5, [self._HAIKU_5_5])
+        self.assertEqual(result, {"is_error": False, "subtype": "success"})
+
+    def test_mismatch_is_not_retried(self) -> None:
+        summary = {
+            "ok": False,
+            "metrics": {"result_subtype": harness.OMP_MODEL_MISMATCH_SUBTYPE},
+        }
+        self.assertFalse(harness._summary_is_retryable(summary))
+
+    def test_metrics_record_models_used(self) -> None:
+        result = {"usage": {}, "models_used": [self._HAIKU_4_5]}
+        metrics = harness._metrics_from_result(result, 1.0)
+        self.assertEqual(metrics["models_used"], [self._HAIKU_4_5])
+
+    def test_require_model_raises_when_catalog_lacks_id(self) -> None:
+        with mock.patch.object(
+            harness, "_omp_bedrock_catalog", return_value={self._HAIKU_4_5}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fuzzy-match"):
+                harness._require_omp_bedrock_model(self._bedrock_config(), {})
+
+    def test_require_model_passes_when_catalog_lists_id(self) -> None:
+        with mock.patch.object(
+            harness, "_omp_bedrock_catalog", return_value={self._HAIKU_5_5}
+        ):
+            self.assertIsNone(
+                harness._require_omp_bedrock_model(self._bedrock_config(), {})
+            )
+
+    def test_catalog_parses_model_ids(self) -> None:
+        stdout = json.dumps({"models": [{"id": self._HAIKU_5_5}, {"name": "no id"}]})
+        completed = mock.Mock(stdout=stdout)
+        with mock.patch.object(harness.subprocess, "run", return_value=completed):
+            self.assertEqual(harness._omp_bedrock_catalog({}), {self._HAIKU_5_5})
+
+    def test_catalog_without_models_list_raises_runtime_error(self) -> None:
+        completed = mock.Mock(stdout=json.dumps([{"id": self._HAIKU_5_5}]))
+        with mock.patch.object(harness.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "no 'models' list"):
+                harness._omp_bedrock_catalog({})
+
+    def test_catalog_timeout_raises_runtime_error(self) -> None:
+        timeout = harness.subprocess.TimeoutExpired(cmd="omp", timeout=60)
+        with mock.patch.object(harness.subprocess, "run", side_effect=timeout):
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                harness._omp_bedrock_catalog({})
